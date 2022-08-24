@@ -1,4 +1,5 @@
 import Struct.Struct
+import Struct.CustomTactics
 
 -- Setup
 inductive Even : Nat → Prop
@@ -43,7 +44,7 @@ example : Even 4 := by
     apply Even.zero
 
 example (as : List α) (pas : Palindrome as) : Palindrome (reverse as) := by
-  induction as
+  structured induction as
   case nil =>
     simp only [reverse]
     exact pas
@@ -73,7 +74,15 @@ example (as : List α) (pas : Palindrome as) : Palindrome (reverse as) := by
 
 -- STRUCTURED TEST CASES FROM DIAGRAM
 -- Case 1a : Match on show, bracketed
+-- example : Even 0 := by
+--   structured {
+--     show Even 0 by Even.zero
+--   }
 -- Case 1b : Match on show, indented
+example : Even 0 := by
+  structured 
+    show Even 0 by Even.zero
+  
 -- Case 2 : Match on suffices
 -- Case 3 : Match on have
 -- Case 4 : Match on clear
