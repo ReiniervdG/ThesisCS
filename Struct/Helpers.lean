@@ -1,8 +1,14 @@
 import Lean
 
-open Lean
+import Struct.CustomTactics
 
-def diff_lctx (ctx₁ : LocalContext) (ctx₂: LocalContext) : Array LocalDecl := Id.run do
+open 
+  Lean 
+  Lean.Parser.Tactic 
+  Lean.Elab
+
+-- TODO: Also check with usernames
+def diffLCtx (ctx₁ : LocalContext) (ctx₂: LocalContext) : Array LocalDecl := Id.run do
   let mut x := #[]
   -- TODO: change for hashmaps instead of double loops
   for ldecl₁ in ctx₁ do
@@ -14,3 +20,46 @@ def diff_lctx (ctx₁ : LocalContext) (ctx₂: LocalContext) : Array LocalDecl :
     if !foundDecl then 
       x := x.push ldecl₁
   return x
+
+
+-- Matches existing tacticSeq `ts` and appends tactic `t` at the end
+def mkTacticSeqAppend (ts : TSyntax ``tacticSeq) (t : TSyntax `tactic) : TermElabM (TSyntax ``tacticSeq) :=
+  match ts with
+  | `(tacticSeq| { $[$tacs:tactic $[;]?]* }) =>
+    `(tacticSeq| { $[$(tacs.push t)]* })
+  | `(tacticSeq| $[$tacs:tactic $[;]?]*) =>
+    `(tacticSeq| $[$(tacs.push t)]*)
+  | _ => throwError "unknown syntax"
+
+def mkShow (t : Term) (tacSeq : TSyntax ``tacticSeq) : TermElabM (TSyntax ``tacticSeq) :=
+  `(tacticSeq|
+      show $t by
+        $tacSeq)
+
+-- def mkSuffices
+def mkSuffices (t : Term) (tacSeq : TSyntax ``tacticSeq) : TermElabM (TSyntax ``tacticSeq) := do
+  let finishTac ← `(tactic|exact this)
+  let newTacSeq ← mkTacticSeqAppend tacSeq finishTac
+  `(tacticSeq|
+      suffices $t by
+        $newTacSeq)
+
+-- def mkHave
+def mkHave (t : Term) (tacSeq : TSyntax ``tacticSeq) (n : Option Ident := none) : TermElabM (TSyntax ``tacticSeq) := do
+  match n with
+  | some name => 
+    `(tacticSeq|
+      have $name : $t := by
+        $tacSeq)
+  | none => 
+    `(tacticSeq|
+      have : $t := by
+        $tacSeq)
+
+-- def mkChange
+
+-- def mkCases
+
+-- def mkInduction
+
+-- #eval `(TSyntax.mk <| show 0 = 0 by rfl)
