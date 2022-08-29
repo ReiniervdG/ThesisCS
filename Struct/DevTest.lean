@@ -46,6 +46,28 @@ inductive Even : Nat → Prop
 | zero : Even Nat.zero
 | add_two : ∀ k : Nat, Even k → Even (k+2) 
 
-example : Even 0 := by
-  structured 
-    show Even 0 by apply Even.zero
+-- example : Even 0 := by
+--   structured 
+--     show Even 0 by apply Even.zero
+
+-- import Lean
+open 
+  Lean.Elab.Tactic
+  in
+-- Warning: uses sorry
+def testTactic : TacticM Unit := do
+  let tac ← `(tactic|rfl)
+  match tac with
+  | `(tactic|rfl) =>
+    evalTactic tac
+  | _ => 
+    sorry
+  evalTactic tac
+
+elab &"testTactic" : tactic =>
+  testTactic
+
+example : true := by
+  -- Error: tactic 'tacticTestTactic' has not been implemented
+  testTactic
+  rfl

@@ -40,6 +40,7 @@ def getTacs (ts : TSyntax ``tacticSeq) : TermElabM (Array (TSyntax `tactic)) :=
   | _ => throwError "unknown syntax"
 
 -- Matches existing tacticSeq `ts` and appends tactic `t` at the end
+-- Take tacticSeq instead of Array `tactic so we can match with original formatting
 def mkTacticSeqAppend (ts : TSyntax ``tacticSeq) (t : TSyntax `tactic) : TermElabM (TSyntax ``tacticSeq) :=
   match ts with
   | `(tacticSeq| { $[$tacs:tactic $[;]?]* }) =>

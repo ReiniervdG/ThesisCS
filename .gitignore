@@ -3,3 +3,4 @@
 !/lean_packages/manifest.json
 
 rollingLog.txt
+**/*.code-workspace

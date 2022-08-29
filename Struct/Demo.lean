@@ -18,6 +18,7 @@ def reverse : List α → List α
 
 example : 0 = 0 := by
   structured rfl
+  rfl
 example : 0 = 0 := by
   show 0 = 0 by
     rfl
@@ -37,6 +38,7 @@ example : Even 4 := by
   structured 
     repeat apply Even.add_two _ _
     apply Even.zero
+  
 example : Even 4 := by
   show Even 4 by
     repeat 
@@ -91,7 +93,19 @@ example : Even 0 := by
 -- Case 6 : Match on induction ... TODO
 
 -- Case 7 : Match on intro ... TODO
+example : α → α := by
+  structured intro
+  sorry
+example : α → α := by
+  structured intro ha
+  sorry
 -- Case 8 : Match on intros ... TODO
+example : α → β → α := by
+  structured intros
+  sorry
+example : α → β → α := by
+  structured intros ha hb
+  sorry
 
 -- Case 9 : Match on no old goal response (? maybe not possible)
 -- Case 10 : Match on multiple old goals response
