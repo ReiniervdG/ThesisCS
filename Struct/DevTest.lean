@@ -69,5 +69,5 @@ elab &"testTactic" : tactic =>
 
 example {α : Type} : true := by
   -- Error: tactic 'tacticTestTactic' has not been implemented
-  have a : α := by sorry
+  have ha : α := by sorry
   rfl
