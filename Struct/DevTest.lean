@@ -67,7 +67,7 @@ def testTactic : TacticM Unit := do
 elab &"testTactic" : tactic =>
   testTactic
 
-example : true := by
+example {α : Type} : true := by
   -- Error: tactic 'tacticTestTactic' has not been implemented
-  testTactic
+  have a : α := by sorry
   rfl

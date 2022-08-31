@@ -34,53 +34,13 @@ def structuredIntros (tacSeq : TSyntax ``tacticSeq) (hasExplicitNames : Bool) : 
 
   if !isSameGoal ∧ declsNotInNew.size == 0 ∧ declsNotInOld.size > 0 then
     for decl in declsNotInOld do
-      let bool := decl.userName.isAnonymous
       addTrace `xx m!"{decl.userName} : {decl.type}, hasExplicitnames: {hasExplicitNames})"
   else
     logWarning "Unexpected state in intros match"
 
-#check Name
+-- TODO: structuredCases / structuredInduction (or same as structuredCases with a boolean or something)
 
-def structured (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
-  let tacs ← getTacs tacSeq
-
-  match tacs with
-  | #[] => logWarning "No tactics in tacSeq"
-  -- TODO: Currently only matching on single tactic, optionally want to allow multiple intro/clear calls
-  | #[t] =>
-    match t with
-    | `(tactic|suffices $_ by $_) 
-    | `(tactic|show $_ by $_) 
-    | `(tactic|have $_ : $_ := by $_) 
-    | `(tactic|clear $_)
-      => 
-      addTrace `structured m!"This tactic is already structured"
-      evalTactic tacSeq
-      return
-    | `(tactic|intro)
-    | `(tactic|intros)
-      =>
-      structuredIntros tacSeq false
-      return
-    | `(tactic|intro $id)
-    | `(tactic|intros $ids*)
-      => 
-      structuredIntros tacSeq true
-      return
-    | `(tactic|cases $target)
-    | `(tactic|induction $target)
-      => 
-      addTrace `structured m!"Matched on cases or induction, specific implementation"
-      evalTactic tacSeq
-      return
-    | _ => pure ()
-  | _ => pure ()
-
-  -- This is executed whenever there is no specific match found above
-  match (← getUnsolvedGoals) with
-  | [] => 
-    logWarning m!"No goals to solve, kind of shouldn't reach this, since we can't execute your tactic anyways"
-  | [goal] => 
+def structuredDefault (tacSeq : TSyntax ``tacticSeq) (goal : MVarId) : TacticM Unit := do
     let goalType ← instantiateMVars (← goal.getDecl).type
     evalTactic tacSeq
     match (← getUnsolvedGoals) with
@@ -168,12 +128,46 @@ def structured (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
       -- addTrace `structured m!"All Case Syntax combined : TODO"
       -- -- end temp
 
-  | goal::moreGoals =>
-    let goalDecl ← goal.getDecl
-    logWarning m!"Multiple goals pre-execution. This tactic may not work as expected if multiple goals change. Currently unimplemented"
+-- structured core, mainly matches on pre-goals and input syntax, redirects to respective suggestions
+def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
+  match (← getUnsolvedGoals) with
+  | [] => 
+    logWarning m!"No goals to solve, kind of shouldn't reach this, since we can't execute your tactic anyways"
+  | [goal] => 
+    let tacs ← getTacs tacSeq
+    match tacs with
+    | #[] => logWarning "No tactics in tacSeq"
+    -- TODO: Currently only matching on single tactic, optionally want to allow multiple intro/clear calls
+    | #[t] =>
+      match t with
+      | `(tactic|suffices $_ by $_) 
+      | `(tactic|show $_ by $_) 
+      | `(tactic|have $_ : $_ := by $_) 
+      | `(tactic|clear $_)
+        => 
+        addTrace `structured m!"This tactic is already structured"
+        evalTactic tacSeq
+      | `(tactic|intro)
+      | `(tactic|intros)
+        =>
+        structuredIntros tacSeq false
+      | `(tactic|intro $id)
+      | `(tactic|intros $ids*)
+        => 
+        structuredIntros tacSeq true
+      | `(tactic|cases $target)
+      | `(tactic|induction $target)
+        => 
+        addTrace `structured m!"Matched on cases or induction, specific implementation"
+        evalTactic tacSeq
+      | _ => structuredDefault tacSeq goal
+    | _ => structuredDefault tacSeq goal
+  | _ =>
+    addTrace `structured m!"Multiple goals pre-execution is not supported for this tactic. 
+      Executing tacitc, but no suggestions provided"
     evalTactic tacSeq
 
 -- Elaborate tactic
 elab &"structured " t:tacticSeq : tactic =>
-  structured t
+  structuredCore t
 
