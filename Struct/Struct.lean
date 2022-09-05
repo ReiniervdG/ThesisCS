@@ -42,6 +42,7 @@ def structuredIntros (tacSeq : TSyntax ``tacticSeq) (hasExplicitNames : Bool) : 
 
 def structuredDefault (tacSeq : TSyntax ``tacticSeq) (goal : MVarId) : TacticM Unit := do
     let goalType ← instantiateMVars (← goal.getDecl).type
+    addTrace `structured m!"test"
     evalTactic tacSeq
     match (← getUnsolvedGoals) with
     | [] => 
@@ -147,11 +148,7 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
         => 
         addTrace `structured m!"This tactic is already structured"
         evalTactic tacSeq
-      | `(tactic|intro)
-      | `(tactic|intros)
-        =>
-        structuredIntros tacSeq false
-      | `(tactic|intro $id)
+      | `(tactic|intro $hs:term*)
       | `(tactic|intros $ids*)
         => 
         structuredIntros tacSeq true
@@ -171,3 +168,9 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
 elab &"structured " t:tacticSeq : tactic =>
   structuredCore t
 
+macro "myClear" : tactic => `(tactic|clear h)
+
+example : α → β → α := by
+  structured intros  -- fix (_ : α) (_ : β)
+  -- structured intro (ha : α) (hb : β)
+  sorry

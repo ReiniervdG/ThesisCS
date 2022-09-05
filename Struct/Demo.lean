@@ -18,7 +18,6 @@ def reverse : List α → List α
 
 example : 0 = 0 := by
   structured rfl
-  rfl
 example : 0 = 0 := by
   show 0 = 0 by
     rfl
@@ -72,6 +71,24 @@ example (as : List α) (pas : Palindrome as) : Palindrome (reverse as) := by
 --   a. `strucNote (a : _) (b : _) by c`
 --   b. `strucNote (a : _) (b : _) ⊢ c by d`
 -- Case 4 : Catch failing `strucNote`s ... TODO
+
+-- Case xx : assert hypotheses and goals
+example : α → β → α := by
+  structured intro (ha : α)
+  assert_hyp : α
+  assert_hyp ha : α
+  -- assert_hyp : α → α -- should fail, no such hypothesis
+  -- assert_hyp : β -- should fail, β does not exist
+  -- assert_hyp : ha -- should fail, unknown identifier
+  
+  assert_goal α
+  -- assert_goal β -- should fail, β does not exist
+  -- assert_goal ha -- should fail, unknown identifier
+  -- assert_goal α → α -- should fail, types mismatch
+
+  -- fix (ha : α) ⊢ α
+  
+  exact ha
 
 
 -- STRUCTURED TEST CASES FROM DIAGRAM
