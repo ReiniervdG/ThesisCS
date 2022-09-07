@@ -31,10 +31,11 @@ open
   `note (ha : α) (_ : β) by intros ha _` -> `intros ha _; assert_hyp ha : α; assert_hyp hb: β`  
 
   `note (ha : α) (_ : β) ⊢ α by intros ha _` -> `intros ha _; assert_hyp ha : α; assert_hyp hb: β; assert_goal α`
-  
+
   Simple Elaboration of `fix` to `note` tactic
   `fix (ha : α) (_ : β) ⊢ α` -> `note (ha : α) (_ : β) ⊢ α by intros ha _`
 
+  Finally some examples of `fix` and `note` tactics
 -/
 
 -- ##  Extend tactic version of show to support `by`
