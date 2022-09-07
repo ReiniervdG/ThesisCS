@@ -131,13 +131,13 @@ def expandStrucGoal (lhs : Option (TSyntax ``tacticSeq)) (osg : Option (TSyntax 
 -- ### Possibility 2: gather all tactics separately, concatenate at the end (harder to )
 
 -- TODO: this note tactic doesn't reduce to a single tactic but a tacSeq, how does that work?
-macro &"note " bs:strucBinder* optStrucGoal:(strucGoal)? optStrucBy:(strucBy)? : tactic => do
+macro &"note " bs:strucBinder* optStrucGoal:(strucGoal)? optStrucBy:(strucBy)? : tacticSeq => do
   let x ← expandStrucGoal (← expandBinders (← expandStrucBy optStrucBy) bs) optStrucGoal
   match x with
   | some y => 
     let z ← getTacs y
-    `(tactic|{$[$(z)]*})
-  | none => `(tactic|rfl)
+    return y
+  | none => `(tacticSeq|rfl)
 
 -- example : α → β → α := by
 --   -- intros ha _
