@@ -39,40 +39,40 @@ def getTacs (ts : TSyntax ``tacticSeq) : TermElabM (Array (TSyntax `tactic)) :=
   | `(tacticSeq| $[$tacs:tactic $[;]?]*) => return tacs
   | _ => throwError "unknown syntax"
 
--- Matches existing tacticSeq `ts` and appends tactic `t` at the end
--- Take tacticSeq instead of Array `tactic so we can match with original formatting
-def mkTacticSeqAppend (ts : TSyntax ``tacticSeq) (t : TSyntax `tactic) : TermElabM (TSyntax ``tacticSeq) :=
-  match ts with
-  | `(tacticSeq| { $[$tacs:tactic $[;]?]* }) =>
-    `(tacticSeq| { $[$(tacs.push t)]* })
-  | `(tacticSeq| $[$tacs:tactic $[;]?]*) =>
-    `(tacticSeq| $[$(tacs.push t)]*)
-  | _ => throwError "unknown syntax"
+-- @[deprecated]
+-- def mkTacticSeqAppend (ts : TSyntax ``tacticSeq) (t : TSyntax `tactic) : TermElabM (TSyntax ``tacticSeq) :=
+--   match ts with
+--   | `(tacticSeq| { $[$tacs:tactic $[;]?]* }) =>
+--     `(tacticSeq| { $[$(tacs.push t)]* })
+--   | `(tacticSeq| $[$tacs:tactic $[;]?]*) =>
+--     `(tacticSeq| $[$(tacs.push t)]*)
+--   | _ => throwError "unknown syntax"
 
-def mkShow (t : Term) (tacSeq : TSyntax ``tacticSeq) : TermElabM (TSyntax ``tacticSeq) :=
-  `(tacticSeq|
-      show $t by
-        $tacSeq)
+-- @[deprecated]
+-- def mkShow (t : Term) (tacSeq : TSyntax ``tacticSeq) : TermElabM (TSyntax ``tacticSeq) :=
+--   `(tacticSeq|
+--       show $t by
+--         $tacSeq)
 
--- def mkSuffices
-def mkSuffices (t : Term) (tacSeq : TSyntax ``tacticSeq) : TermElabM (TSyntax ``tacticSeq) := do
-  let finishTac ← `(tactic|exact this)
-  let newTacSeq ← mkTacticSeqAppend tacSeq finishTac
-  `(tacticSeq|
-      suffices $t by
-        $newTacSeq)
+-- @[deprecated]
+-- def mkSuffices (t : Term) (tacSeq : TSyntax ``tacticSeq) : TermElabM (TSyntax ``tacticSeq) := do
+--   let finishTac ← `(tactic|exact this)
+--   let newTacSeq ← mkTacticSeqAppend tacSeq finishTac
+--   `(tacticSeq|
+--       suffices $t by
+--         $newTacSeq)
 
--- def mkHave
-def mkHave (t : Term) (tacSeq : TSyntax ``tacticSeq) (n : Option Ident := none) : TermElabM (TSyntax ``tacticSeq) :=
-  match n with
-  | some name => 
-    `(tacticSeq|
-      have $name : $t := by
-        $tacSeq)
-  | none => 
-    `(tacticSeq|
-      have : $t := by
-        $tacSeq)
+-- @[deprecated]
+-- def mkHave (t : Term) (tacSeq : TSyntax ``tacticSeq) (n : Option Ident := none) : TermElabM (TSyntax ``tacticSeq) :=
+--   match n with
+--   | some name => 
+--     `(tacticSeq|
+--       have $name : $t := by
+--         $tacSeq)
+--   | none => 
+--     `(tacticSeq|
+--       have : $t := by
+--         $tacSeq)
 
 -- def mkFix ... TODO from intro/intros
 

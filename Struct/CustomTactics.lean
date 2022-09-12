@@ -95,9 +95,9 @@ def mkTacticSeqAppendTacs (tacSeq : TSyntax ``tacticSeq) (tail : Array (TSyntax 
   | _ => throwUnsupportedSyntax
 
 -- ## Define TSyntax objects for note
-syntax strucBinder := "(" ((ident <|> hole)) " : " term ")"
-syntax strucGoal := "⊢ " term
-syntax strucBy := "by " tacticSeq
+syntax strucBinder := " (" ((ident <|> hole)) " : " term ") "
+syntax strucGoal := " ⊢ " term
+syntax strucBy := " by " tacticSeq
 
 /- ## Map TSyntax to useful TSyntax -/
 def strucBinderToAssertTactic : TSyntax ``strucBinder → TermElabM (TSyntax `tactic)
