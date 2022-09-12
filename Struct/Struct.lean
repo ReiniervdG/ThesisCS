@@ -28,14 +28,13 @@ structure StateDiff where
   changedDecls : Array LocalDecl
   removedDecls : Array LocalDecl
 
-def mkStateDiff : StateDiff where
-  newlyChangedGoal := none
-  newDecls := #[]
-  changedDecls := #[]
-  removedDecls := #[]
-
 def goalsToStateDiff (oldGoal : MVarId) (newGoal : MVarId) : TacticM StateDiff := do
-  return mkStateDiff
+  let oldGoalType ← instantiateMVars (← oldGoal.getDecl).type
+  let newGoalType ← instantiateMVars (← newGoal.getDecl).type
+  let isSameGoal := oldGoalType.consumeMData == newGoalType.consumeMData
+  let newlyChangedGoal := if isSameGoal then none else some (← delab newGoalType)
+
+  return StateDiff.mk newlyChangedGoal #[] #[] #[]
 
 -- ## Helpers ..
 def declToBinder (decl : LocalDecl) : TermElabM (TSyntax `strucBinder) := do
@@ -142,13 +141,15 @@ def structureCasesDefault (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (new
     
     -- Compare newGoal to oldGoal
     -- TODO new comparison implementation
+    let stateDiff ← goalsToStateDiff oldGoal newGoal
 
     -- Construct change annotation
-    let annotation ← mkNote #[] none none
+    let annotation ← mkNote #[] stateDiff.newlyChangedGoal none
 
     -- Construct full case
     let caseId := mkIdent goalUserName
-    let caseBinderId : TSyntax ``binderIdent ← `(binderIdent|$caseId:ident)
+    let caseIdName := mkIdent (← newGoal.getTag)
+    let caseBinderId : TSyntax ``binderIdent ← `(binderIdent|$caseIdName:ident)
     let case ← `(tactic|case $caseBinderId => $annotation:tactic)
     cases := cases.push case  
   
@@ -225,6 +226,7 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
         => 
         addTrace `structured m!"This tactic is already structured"
         evalTactic tacSeq
+      -- TODO: Currently also matches on patterns, probably wrong matching here
       | `(tactic|intro $ids:ident*)
       | `(tactic|intros $ids*)
         => 
