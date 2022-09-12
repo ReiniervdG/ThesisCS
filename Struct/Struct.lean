@@ -12,11 +12,30 @@ open
   Lean.Parser 
   Lean.Parser.Tactic
 
+-- TMP for debugging
+set_option pp.rawOnError true
+
 /-
   # Description of this file ..
 
   -- MAIN TODO for now: Revamp comparison of MVarIds, also checking userNames, consider cleared / changed / added decls, maybe a new type for it?
 -/
+
+-- TODO: Testing Segment for comparison revamp
+structure StateDiff where
+  newlyChangedGoal : Option Term
+  newDecls : Array LocalDecl
+  changedDecls : Array LocalDecl
+  removedDecls : Array LocalDecl
+
+def mkStateDiff : StateDiff where
+  newlyChangedGoal := none
+  newDecls := #[]
+  changedDecls := #[]
+  removedDecls := #[]
+
+def goalsToStateDiff (oldGoal : MVarId) (newGoal : MVarId) : TacticM StateDiff := do
+  return mkStateDiff
 
 -- ## Helpers ..
 def declToBinder (decl : LocalDecl) : TermElabM (TSyntax `strucBinder) := do
@@ -30,6 +49,10 @@ def declToBinder (decl : LocalDecl) : TermElabM (TSyntax `strucBinder) := do
 --   let oldGoalType ← instantiateMVars (← oldGoal.getDecl).type
 --   let newGoalType ← instantiateMVars (← newGoal.getDecl).type
 --   let isSameGoal := oldGoalType.consumeMData == newGoalType.consumeMData
+
+-- TODO : strip original tacSeq of comments (optional)
+
+-- TODO : Move helpers `getTacs` and `diffLCtx` here, where `diffLCtx` should be obsolete after revamping context comparison. Remove helpers file
 
 -- ## State to tactic(Seq) builders
 def mkShow (newGoalTerm : Term) (tacSeq : TSyntax ``tacticSeq) : TermElabM (TSyntax `tactic) := do
@@ -51,11 +74,17 @@ def mkFix (decls : Array LocalDecl) (goal : Term) : TermElabM (TSyntax `tactic) 
   let binders ← decls.mapM (fun decl => declToBinder decl)
   `(tactic|fix $[$binders]* ⊢ $goal)
 
-def mkNote (decls : Array LocalDecl := #[]) (optGoal : Option Term := none) (tacSeq : TSyntax ``tacticSeq) : TermElabM (TSyntax `tactic) := do
+def mkNote (decls : Array LocalDecl := #[]) (optGoal : Option Term := none) (optTacSeq : Option (TSyntax ``tacticSeq)) : TermElabM (TSyntax `tactic) := do
   let binders ← decls.mapM (fun decl => declToBinder decl)  
   match optGoal with
-  | some goal => `(tactic|note $[$binders]* ⊢ $goal by $tacSeq)
-  | none => `(tactic|note $[$binders]* by $tacSeq)
+  | some goal => 
+    match optTacSeq with
+    | some tacSeq => `(tactic|note $[$binders]* ⊢ $goal by $tacSeq)
+    | none => `(tactic|note $[$binders]* ⊢ $goal)
+  | none => 
+    match optTacSeq with
+    | some tacSeq => `(tactic|note $[$binders]* by $tacSeq)
+    | none => `(tactic|note $[$binders]*)
 
 def mkCases (x : TSyntax ``casesTarget) (y : TSyntax ``binderIdent) : TermElabM (TSyntax ``tacticSeq) := do
   `(tacticSeq|
@@ -66,6 +95,10 @@ def mkCases (x : TSyntax ``casesTarget) (y : TSyntax ``binderIdent) : TermElabM 
 -- def mkInduction
 
 -- def mkAutoCases
+
+-- def mkCase
+
+-- def mkMatch (?)
 
 -- ## Structured branches
 def structuredIntros (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) : TacticM Unit := do
@@ -90,12 +123,38 @@ def structuredIntros (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) : TacticM
       throwError "Unexpected state in intros match"
   | _ => throwError "Having multiple goals post-intros should be impossible"
 
--- def structuredCases
+def structuredCases (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (target : TSyntax ``casesTarget) : TacticM Unit := do
+  pure ()
 
 -- def structuredInduction
 
 -- structuredCasesDefault: When multiple post-goals, but no match on cases or induction
--- def structuredCasesDefault
+def structureCasesDefault (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (newGoals : List MVarId) : TacticM Unit := do
+  let mut cases : Array (TSyntax `tactic) := #[]
+
+  -- Construct a case for each new goal
+  -- TODO : Move to separate function and use MapM
+  for newGoal in newGoals do
+    -- TODO: Get Tag or UserName corresponding to the new goal    
+    -- TODO: Some initial check on whether goalUserName is good enough, otherwise I guess just use a hole. Need examples for this though
+    -- let goalTag := mkIdent (← newGoal.getTag)
+    let goalUserName := (← newGoal.getDecl).userName
+    
+    -- Compare newGoal to oldGoal
+    -- TODO new comparison implementation
+
+    -- Construct change annotation
+    let annotation ← mkNote #[] none none
+
+    -- Construct full case
+    let caseId := mkIdent goalUserName
+    let caseBinderId : TSyntax ``binderIdent ← `(binderIdent|$caseId:ident)
+    let case ← `(tactic|case $caseBinderId => $annotation:tactic)
+    cases := cases.push case  
+  
+  -- Append all 
+  let suggestion ← mkTacticSeqAppendTacs tacSeq cases
+  addTrace `structured m!"Try this: {suggestion}"
 
 def structuredDefault_tmp (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) : TacticM Unit := do
   evalTactic tacSeq
@@ -143,7 +202,7 @@ def structuredDefault_tmp (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) : Ta
           addTrace `structured m!"Try this: {suggestion}"
 
   | newGoals => 
-    addTrace `structured m!"tmp"  
+    structureCasesDefault tacSeq oldGoal newGoals
     pure ()
 
 -- ## Core structured elaboration
@@ -174,7 +233,8 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
       | `(tactic|induction $target)
         => 
         addTrace `structured m!"Matched on cases or induction, specific implementation"
-        evalTactic tacSeq
+        -- TEMP: passing to default to test non-specific case expansion
+        structuredDefault_tmp tacSeq goal
       | _ => structuredDefault_tmp tacSeq goal
     | _ => structuredDefault_tmp tacSeq goal
   | _ =>
@@ -305,3 +365,7 @@ example (h : α ∧ β) : α ∨ b := by
     have ha : α := h.left
     have hb : β := h.right    
     apply Or.intro_left _ ha
+
+example (n : Nat) : n = n := by
+  structured cases n
+  rfl rfl

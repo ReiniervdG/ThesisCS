@@ -95,6 +95,7 @@ def mkTacticSeqAppendTacs (tacSeq : TSyntax ``tacticSeq) (tail : Array (TSyntax 
   | _ => throwUnsupportedSyntax
 
 -- ## Define TSyntax objects for note
+-- TODO: Optionally reuse the Lean.Tactics `binderIdent` syntax
 syntax strucBinder := " (" ((ident <|> hole)) " : " term ") "
 syntax strucGoal := " ⊢ " term
 syntax strucBy := " by " tacticSeq
