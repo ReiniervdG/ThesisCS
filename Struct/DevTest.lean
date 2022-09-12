@@ -1,5 +1,4 @@
 import Struct.Struct
-import Struct.CustomTactics
 
 set_option pp.rawOnError true
 set_option trace.debug true

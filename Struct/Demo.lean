@@ -1,5 +1,4 @@
 import Struct.Struct
-import Struct.CustomTactics
 
 -- Setup
 inductive Even : Nat → Prop
@@ -15,6 +14,67 @@ def reverse : List α → List α
 | [] => []
 | a::as => as ++ [a]
 
+/-
+  # Custom Tactics Test Cases
+-/
+
+-- CT01 : `show .. by` macro expansion
+example : 0 = 0 := by
+  show 0 = 0 by rfl
+
+-- ## assertGoal
+-- CT02 : `assertGoal` succeeds if goal same
+example (ha : α) : α := by
+  assertGoal α
+  assumption
+-- CT03 : `assertGoal` fails for unknown `newGoalType`
+example (ha : α) : α := by
+  -- assertGoal β -- Error: `unknown identifier 'β'`
+  assumption
+example {α β : Type} (hb : β ) : β := by
+  -- assertGoal α -- Error: `AssertionError: Expected goal α, got β`
+  assumption
+
+-- ## assertHyp
+-- CT04 : Named `assertHyp` succeeds if name and type match
+example (ha : α ) : α := by
+  assertHyp ha : α
+  assumption
+
+-- CT05 : Named `assertHyp` fails if name mismatch (but type in local declarations)
+example (ha : α) : α := by
+  -- assertHyp ha2 : α -- Error : `TODO`
+  assumption
+
+-- CT05 : Named `assertHyp` fails if name match but types different
+example (ha : α ) : α := by
+  -- assertHyp ha : α ∧ α -- Error : `TODO`
+  assumption
+
+-- CT06 : Unnamed `assertHyp` succeeds if type exists in local declarations
+example (_ : α) : α := by
+  assertHyp : α 
+  assumption
+
+-- CT07 : unnamed `assertHyp` fails if type does not exist in local declarations
+example {β : Type} (ha : α ) : α := by
+  -- assertHyp : β -- Error : `TODO`
+  assumption
+
+-- ## fix
+
+-- ## note
+
+/- 
+  # Structured Tactic Syntax Match Test Cases
+-/
+
+/-
+  # Structured Tactic Default Test Cases
+-/
+
+
+-- ### OLD BELOW
 
 example : 0 = 0 := by
   structured rfl

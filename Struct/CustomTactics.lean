@@ -51,7 +51,7 @@ def assertGoal (goalType : TSyntax `term) : TacticM Unit := do
   else
     return
 
-elab &"assert_goal " t:term : tactic =>
+elab &"assertGoal " t:term : tactic =>
   assertGoal t
 
 def assertHyp (hypName : Option (TSyntax `ident) := none) (hypType : TSyntax `term) : TacticM Unit := do
@@ -74,7 +74,7 @@ def assertHyp (hypName : Option (TSyntax `ident) := none) (hypType : TSyntax `te
           throwError "Found named hypothesis, but types do not match"
     throwError "Cannot find named hypothesis TODO of type TODO"
 
-elab &"assert_hyp " hypName:(ident)? " : " hypType:term : tactic =>
+elab &"assertHyp " hypName:(ident)? " : " hypType:term : tactic =>
   assertHyp hypName hypType
 
 -- ## Define helpers for building tacticSeqs
@@ -101,19 +101,18 @@ syntax strucBy := " by " tacticSeq
 
 /- ## Map TSyntax to useful TSyntax -/
 def strucBinderToAssertTactic : TSyntax ``strucBinder → TermElabM (TSyntax `tactic)
-  | `(strucBinder| ($i:ident : $u:term)) => `(tactic|assert_hyp $i : $u)
-  | `(strucBinder| (_ : $u:term)) => `(tactic|assert_hyp : $u)
+  | `(strucBinder| ($i:ident : $u:term)) => `(tactic|assertHyp $i : $u)
+  | `(strucBinder| (_ : $u:term)) => `(tactic|assertHyp : $u)
   | _ => throwUnsupportedSyntax
 
 def strucGoalToAssertGoal : TSyntax ``strucGoal → TermElabM (TSyntax `tactic)
-  | `(strucGoal| ⊢ $t:term) => `(tactic|assert_goal $t)
+  | `(strucGoal| ⊢ $t:term) => `(tactic|assertGoal $t)
   | _ => throwUnsupportedSyntax
 
 def strucByToTacSeq : TSyntax ``strucBy → TermElabM (TSyntax ``tacticSeq)
   | `(strucBy| by $tacSeq:tacticSeq) => `(tacticSeq|$tacSeq)
   | _ => throwUnsupportedSyntax
 
--- TODO: fix having to use TacticM here, a bit unnecessary i guess
 def strucBinderToId (b : TSyntax `strucBinder) : TermElabM (TSyntax [`ident, `Lean.Parser.Term.hole]) := do
   match b with
   | `(strucBinder| ($i:ident : $u:term)) => return i

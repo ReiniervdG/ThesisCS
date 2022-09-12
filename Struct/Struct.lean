@@ -54,7 +54,7 @@ def mkFix (decls : Array LocalDecl) (goal : Term) : TermElabM (TSyntax `tactic) 
 def mkNote (decls : Array LocalDecl := #[]) (optGoal : Option Term := none) (tacSeq : TSyntax ``tacticSeq) : TermElabM (TSyntax `tactic) := do
   let binders ← decls.mapM (fun decl => declToBinder decl)  
   match optGoal with
-  | some goal => `(tactic|note $[$binders]* ⊢ $goal $ by $tacSeq)
+  | some goal => `(tactic|note $[$binders]* ⊢ $goal by $tacSeq)
   | none => `(tactic|note $[$binders]* by $tacSeq)
 
 def mkCases (x : TSyntax ``casesTarget) (y : TSyntax ``binderIdent) : TermElabM (TSyntax ``tacticSeq) := do
@@ -111,6 +111,8 @@ def structuredDefault_tmp (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) : Ta
     let newGoalType ← instantiateMVars (← newGoal.getDecl).type
     let isSameGoal := oldGoalType.consumeMData == newGoalType.consumeMData
 
+    addTrace `test m!"{isSameGoal} : {oldGoalType} : {newGoalType}"
+
     let oldLCtx := (← oldGoal.getDecl).lctx
     let newLCtx := (← newGoal.getDecl).lctx
 
@@ -134,13 +136,15 @@ def structuredDefault_tmp (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) : Ta
       else
         match isSameGoal with
         | true => 
-          let suggestion ← mkNote addedDecls (some (← delab newGoalType)) tacSeq
-          addTrace `structured m!"Try this: {suggestion}"
-        | false =>
           let suggestion ← mkNote addedDecls none tacSeq
           addTrace `structured m!"Try this: {suggestion}"
+        | false =>
+          let suggestion ← mkNote addedDecls (some (← delab newGoalType)) tacSeq
+          addTrace `structured m!"Try this: {suggestion}"
 
-  | newGoals => pure ()
+  | newGoals => 
+    addTrace `structured m!"tmp"  
+    pure ()
 
 -- ## Core structured elaboration
 def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
@@ -156,7 +160,8 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
       match t with
       | `(tactic|suffices $_ by $_) 
       | `(tactic|show $_ by $_) 
-      | `(tactic|have $_ : $_ := by $_) 
+      | `(tactic|have $[$id]? : $_ := by $_) 
+      | `(tactic|have $[$id]? : $_ := $_) 
       | `(tactic|clear $_)
         => 
         addTrace `structured m!"This tactic is already structured"
@@ -180,9 +185,8 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
 -- Elaborate tactic
 elab &"structured " t:tacticSeq : tactic =>
   structuredCore t
--- ## TODO: Restructure old below
 
--- TODO: structuredCases / structuredInduction (or same as structuredCases with a boolean or something)
+-- ## TODO: Restructure old below
 
 def structuredDefault (tacSeq : TSyntax ``tacticSeq) (goal : MVarId) : TacticM Unit := do
     let goalType ← instantiateMVars (← goal.getDecl).type
@@ -282,7 +286,9 @@ example : α → β → α := by
   -- structured intros
   -- structured intros ha _
 
-  fix (ha : α) (_ : β) ⊢ α
+  -- TODO: we actually don't want to match on intro patterns, but it still seems to
+  structured intro (ha : α) (_ : β)
+  -- fix (ha : α) (_ : β) ⊢ α
   exact ha
 
 inductive Even : Nat → Prop
@@ -292,3 +298,10 @@ inductive Even : Nat → Prop
 example (n : Nat) (h : Even n): Even (n + 2) := by
   structured repeat apply Even.add_two _ _
   exact h
+
+
+example (h : α ∧ β) : α ∨ b := by
+  structured 
+    have ha : α := h.left
+    have hb : β := h.right    
+    apply Or.intro_left _ ha
