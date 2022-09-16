@@ -5,6 +5,7 @@ import Struct.CustomTactics
 
 open 
   Lean 
+  Lean.Expr
   Lean.Meta 
   Lean.Elab 
   Lean.Elab.Tactic
@@ -156,27 +157,42 @@ def structuredCases (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (target : 
   let env ← getEnv
 
   match target with
-  | `(casesTarget|$t:term)
-  | `(casesTarget|$_ : $t:term) =>
+  | `(casesTarget|$targetTerm:term)
+  | `(casesTarget|$_ : $targetTerm:term) =>
     -- TODO: I get casesTarget as a term, but from what I've seen, I match the name of the case from the Expr.const
     -- Elaborating this term does not seem to have the desired form
-    let elaboratedTerm ← elabTerm t none
-    let termType ← inferType elaboratedTerm
-    match termType with
-    -- TODO: Also match on applications of constants, look into something `getAppFn`
-    | .const n s => 
-      let cstInfo := env.find? n
+    let targetExpr ← elabTerm targetTerm none
+    let targetType ← inferType targetExpr
+
+    -- Get expr of underlying function application
+    let fnExpr := getAppFn targetType
+
+    -- Match that Expr with its name in the environment
+    match fnExpr with
+    | .const fnName _ => 
+      let cstInfo := env.find? fnName
 
       match cstInfo with 
       | some (.inductInfo ival) => 
         let ctors := ival.ctors
-        addTrace `xx m!"{ctors}"
+        -- for Nat, `ctors := [Nat.zero, Nat.succ]`
+        addTrace `xx m!"Constructors: {ctors}"
+        
+        for ctor in ctors do
+          let ctorInfo := env.find? ctor
+          match ctorInfo with
+          | some (.ctorInfo cval) => 
+            addTrace `xx m!"Constructor {ctor} for inductive type {cval.induct} with numParams {cval.numParams}, numFields {cval.numFields}, with type  {cval.type}"
+          | _ => 
+            addTrace `xx m!"Unexpected 04"
+        
       | _ => 
-        addTrace `xx m!"Other, unknown"
+        addTrace `xx m!"Unexpected error 03"
 
     -- TODO: reaching this, elaboratedTerm is currently not a const
-    | _ => addTrace `xx m!"Test02 {repr elaboratedTerm}"
-  | _ => addTrace `xx m!"Test03"
+    | _ => addTrace `xx m!"Unexpected error 02, targetType: {repr targetType}, fnExpr: {repr fnExpr}"
+  | _ => addTrace `xx m!"Unexpected error 01"
+
 
 -- def structuredInduction
 -- Should be pretty similar to structuredCases, except with a different tacSeq match. Could potentially be combined, depending on construction of match statement
@@ -188,9 +204,6 @@ def structureCasesDefault (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (new
   -- Construct a case for each new goal
   -- TODO : Move to separate function and use MapM
   for newGoal in newGoals do
-    -- TODO: Get Tag or UserName corresponding to the new goal    
-    -- TODO: Some initial check on whether goalUserName is good enough, otherwise I guess just use a hole. Need examples for this though
-    -- let goalTag := mkIdent (← newGoal.getTag)
     let goalUserName := (← newGoal.getDecl).userName
     
     -- Compare newGoal to oldGoal
@@ -430,18 +443,11 @@ example (h : α ∧ β) : α ∨ b := by
 
 example (n : Nat) : n = n := by
   structured cases n
-  repeat rfl
-
-
-  -- structured 
-  --   cases n
-  --   try intro -- note, this is only added because then we don't match with cases
-  -- case succ m => 
-  --   -- TODO: m is unknown
-  --   -- cases m -- but can use it for cases ..
-  --   note (m : Nat) ⊢ Nat.succ m = Nat.succ m
-  --   rfl
+  -- cases n with
+  -- | zero => rfl
+  -- | succ m => rfl
   -- repeat rfl
+
 
 example : α ↔ β := by
   -- Is there a way of combining these cases in the application line?
