@@ -43,9 +43,9 @@ macro "show " type:term " by " tacSeq:tacticSeq : tactic =>
   `(exact show $type by $tacSeq)
 
 -- ## Introduce assertion helpers
-def assertGoal (goalType : TSyntax `term) : TacticM Unit := do
+def assertGoal (goalType : TSyntax `term) : TacticM Unit := withMainContext do
   let realGoalType ← instantiateMVars (← (← getMainGoal).getDecl).type.consumeMData
-  let mut expectedGoalType := (← elabTerm goalType none).consumeMData
+  let expectedGoalType := (← elabTerm goalType none).consumeMData
   if !(realGoalType == expectedGoalType) then
     throwError m!"AssertionError: Expected goal {expectedGoalType}, got {realGoalType}"
   else
@@ -54,7 +54,7 @@ def assertGoal (goalType : TSyntax `term) : TacticM Unit := do
 elab &"assertGoal " t:term : tactic =>
   assertGoal t
 
-def assertHyp (hypName : Option (TSyntax `ident) := none) (hypType : TSyntax `term) : TacticM Unit := do
+def assertHyp (hypName : Option (TSyntax `ident) := none) (hypType : TSyntax `term) : TacticM Unit := withMainContext do
   let hypExpr ← elabTerm hypType none
   let mainGoal ← getMainGoal
   let lCtx := (← mainGoal.getDecl).lctx

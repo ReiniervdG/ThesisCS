@@ -18,15 +18,15 @@ set_option pp.rawOnError true
 /-
   # Description of this file ..
 
-  -- MAIN TODO for now: Revamp comparison of MVarIds, also checking userNames, consider cleared / changed / added decls, maybe a new type for it?
 -/
 
 -- TODO: Testing Segment for comparison revamp
 structure StateDiff where
   newlyChangedGoal : Option Term
-  newDecls : Array LocalDecl
+  newDecls : Array LocalDecl -- Includes any new inaccessible decl
   changedDecls : Array LocalDecl
   removedDecls : Array LocalDecl
+  -- inaccssibleDecls : Array LocalDecl
 
 def goalsToStateDiff (oldGoal : MVarId) (newGoal : MVarId) : TacticM StateDiff := do
   let oldGoalType ← instantiateMVars (← oldGoal.getDecl).type
@@ -34,7 +34,40 @@ def goalsToStateDiff (oldGoal : MVarId) (newGoal : MVarId) : TacticM StateDiff :
   let isSameGoal := oldGoalType.consumeMData == newGoalType.consumeMData
   let newlyChangedGoal := if isSameGoal then none else some (← delab newGoalType)
 
-  return StateDiff.mk newlyChangedGoal #[] #[] #[]
+  let oldLCtx := (← oldGoal.getDecl).lctx
+  let newLCtx := (← newGoal.getDecl).lctx
+
+  let mut newDecls := #[]
+  let mut changedDecls := #[]
+  let mut removedDecls := #[]
+
+  -- Detecting new or changed decls
+  -- Assumption: For changed decls, the userName is still the same
+  -- For any new decl, check if it is inaccssible, distribute between newDecls and inaccssibleDecls in StateDiff
+  for oldDecl in oldLCtx do
+    for newDecl in newLCtx do
+      if oldDecl.userName == newDecl.userName then
+        if !(oldDecl.type.consumeMData == newDecl.type.consumeMData) then
+          changedDecls := changedDecls.push newDecl
+      else if newDecl.userName.hasMacroScopes then
+        -- inaccssibleDecls := inaccssibleDecls.push newDecl
+        pure ()
+      else
+        -- TODO probably wrong, not everything is a newDecl right??
+        newDecls := newDecls.push newDecl
+
+  -- Detecting removed decls
+
+  -- old testing
+  for oldDecl in oldLCtx do
+    for newDecl in newLCtx do
+      -- Step 1 : Check if newDecl is inaccessible
+      if newDecl.userName.hasMacroScopes then
+        addTrace `xx m!"hasMacroScopes {newDecl.type}"
+      else
+        addTrace `xx m!"!hasMacroScopes {newDecl.type}"
+
+  return StateDiff.mk newlyChangedGoal newDecls changedDecls removedDecls
 
 -- ## Helpers ..
 def declToBinder (decl : LocalDecl) : TermElabM (TSyntax `strucBinder) := do
@@ -42,12 +75,6 @@ def declToBinder (decl : LocalDecl) : TermElabM (TSyntax `strucBinder) := do
     return (← `(strucBinder|(_ : $(← delab decl.type))))
   else 
     return (← `(strucBinder|($(mkIdent decl.userName) : $(← delab decl.type))))
-
--- TODO: Consolidate some logic about comparing goals and local contexts, bit tough especially in its intended return type, maybe a custom structure?
--- def diffGoals (oldGoal : MVarId) (newGoal : MVarId) : TermElabM Unit := do
---   let oldGoalType ← instantiateMVars (← oldGoal.getDecl).type
---   let newGoalType ← instantiateMVars (← newGoal.getDecl).type
---   let isSameGoal := oldGoalType.consumeMData == newGoalType.consumeMData
 
 -- TODO : strip original tacSeq of comments (optional)
 
@@ -83,21 +110,22 @@ def mkNote (decls : Array LocalDecl := #[]) (optGoal : Option Term := none) (opt
   | none => 
     match optTacSeq with
     | some tacSeq => `(tactic|note $[$binders]* by $tacSeq)
-    | none => `(tactic|note $[$binders]*)
+    | none => 
+      if binders.size == 0 then
+        throwError "Nothing to note, TODO"
+      else
+        `(tactic|note $[$binders]*)
 
+-- def mkCasesMatch
+-- def mkInductionMatch
 def mkCases (x : TSyntax ``casesTarget) (y : TSyntax ``binderIdent) : TermElabM (TSyntax ``tacticSeq) := do
   `(tacticSeq|
     cases $x
     case $y =>
       rfl)
 
--- def mkInduction
-
--- def mkAutoCases
-
 -- def mkCase
-
--- def mkMatch (?)
+-- def mkDefaultCases
 
 -- ## Structured branches
 def structuredIntros (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) : TacticM Unit := do
@@ -123,9 +151,35 @@ def structuredIntros (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) : TacticM
   | _ => throwError "Having multiple goals post-intros should be impossible"
 
 def structuredCases (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (target : TSyntax ``casesTarget) : TacticM Unit := do
-  pure ()
+  -- Initial investigation: can we retrieve from the target and its specification in the env how to construct a match statement
+  -- (or even, how many declarations are constructed by each specific case, kind of num of ldecls with macroScopes)
+  let env ← getEnv
+
+  match target with
+  | `(casesTarget|$t:term)
+  | `(casesTarget|$_ : $t:term) =>
+    -- TODO: I get casesTarget as a term, but from what I've seen, I match the name of the case from the Expr.const
+    -- Elaborating this term does not seem to have the desired form
+    let elaboratedTerm ← elabTerm t none
+    let termType ← inferType elaboratedTerm
+    match termType with
+    -- TODO: Also match on applications of constants, look into something `getAppFn`
+    | .const n s => 
+      let cstInfo := env.find? n
+
+      match cstInfo with 
+      | some (.inductInfo ival) => 
+        let ctors := ival.ctors
+        addTrace `xx m!"{ctors}"
+      | _ => 
+        addTrace `xx m!"Other, unknown"
+
+    -- TODO: reaching this, elaboratedTerm is currently not a const
+    | _ => addTrace `xx m!"Test02 {repr elaboratedTerm}"
+  | _ => addTrace `xx m!"Test03"
 
 -- def structuredInduction
+-- Should be pretty similar to structuredCases, except with a different tacSeq match. Could potentially be combined, depending on construction of match statement
 
 -- structuredCasesDefault: When multiple post-goals, but no match on cases or induction
 def structureCasesDefault (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (newGoals : List MVarId) : TacticM Unit := do
@@ -143,6 +197,8 @@ def structureCasesDefault (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (new
     -- TODO new comparison implementation
     let stateDiff ← goalsToStateDiff oldGoal newGoal
 
+    -- Major TODO: detect inaccessible local context, add to case statement
+
     -- Construct change annotation
     let annotation ← mkNote #[] stateDiff.newlyChangedGoal none
 
@@ -150,7 +206,9 @@ def structureCasesDefault (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (new
     let caseId := mkIdent goalUserName
     let caseIdName := mkIdent (← newGoal.getTag)
     let caseBinderId : TSyntax ``binderIdent ← `(binderIdent|$caseIdName:ident)
-    let case ← `(tactic|case $caseBinderId => $annotation:tactic)
+    let case ← `(tactic|case $caseBinderId => 
+      $annotation:tactic
+      sorry) -- TODO: Currently adding sorry to make sure suggestion is actualy syntactically correct
     cases := cases.push case  
   
   -- Append all 
@@ -181,7 +239,7 @@ def structuredDefault_tmp (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) : Ta
 
     -- Currently we do check for removedDecls, but in reality we don't really know what to do with them in current notation.
     if removedDecls.size > 0 then
-    logWarning m!"That combination of changes in goals and local declarations is currently unsupported, how to handle removed declarations? 
+      logWarning m!"That combination of changes in goals and local declarations is currently unsupported, how to handle removed declarations? 
               isSameGoal, old, new: {isSameGoal} {oldGoalType} {newGoalType}
               Removed Declarations: {removedDecls.size} {removedDecls.map (fun x => x.type)} 
               Added Declarations: {addedDecls.size} {addedDecls.map (fun x => x.type)}"
@@ -231,12 +289,13 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
       | `(tactic|intros $ids*)
         => 
         structuredIntros tacSeq goal
-      | `(tactic|cases $target)
-      | `(tactic|induction $target)
+      | `(tactic|cases $target:casesTarget)
+      -- | `(tactic|induction $target)
         => 
         addTrace `structured m!"Matched on cases or induction, specific implementation"
+        structuredCases tacSeq goal target
         -- TEMP: passing to default to test non-specific case expansion
-        structuredDefault_tmp tacSeq goal
+        -- structuredDefault_tmp tacSeq goal
       | _ => structuredDefault_tmp tacSeq goal
     | _ => structuredDefault_tmp tacSeq goal
   | _ =>
@@ -340,6 +399,7 @@ def structuredDefault (tacSeq : TSyntax ``tacticSeq) (goal : MVarId) : TacticM U
 
 -- structured core, mainly matches on pre-goals and input syntax, redirects to respective suggestions
 
+-- TMP Testing code below
 
 example : α → β → α := by  
   -- structured intro
@@ -353,13 +413,13 @@ example : α → β → α := by
   -- fix (ha : α) (_ : β) ⊢ α
   exact ha
 
-inductive Even : Nat → Prop
-| zero : Even Nat.zero
-| add_two : ∀ k : Nat, Even k → Even (k+2) 
+-- inductive Even : Nat → Prop
+-- | zero : Even Nat.zero
+-- | add_two : ∀ k : Nat, Even k → Even (k+2) 
 
-example (n : Nat) (h : Even n): Even (n + 2) := by
-  structured repeat apply Even.add_two _ _
-  exact h
+-- example (n : Nat) (h : Even n): Even (n + 2) := by
+--   structured repeat apply Even.add_two _ _
+--   exact h
 
 
 example (h : α ∧ β) : α ∨ b := by
@@ -370,4 +430,29 @@ example (h : α ∧ β) : α ∨ b := by
 
 example (n : Nat) : n = n := by
   structured cases n
-  rfl rfl
+  repeat rfl
+
+
+  -- structured 
+  --   cases n
+  --   try intro -- note, this is only added because then we don't match with cases
+  -- case succ m => 
+  --   -- TODO: m is unknown
+  --   -- cases m -- but can use it for cases ..
+  --   note (m : Nat) ⊢ Nat.succ m = Nat.succ m
+  --   rfl
+  -- repeat rfl
+
+example : α ↔ β := by
+  -- Is there a way of combining these cases in the application line?
+  structured apply Iff.intro
+  case mp => sorry
+  case mpr => sorry
+
+  -- apply Iff.intro
+  -- case mp =>
+  --   note ⊢ α → β
+  --   sorry
+  -- case mpr =>
+  --   note ⊢ β → α
+  --   sorry

@@ -3,11 +3,27 @@ import Struct.Struct
 set_option pp.rawOnError true
 set_option trace.debug true
 
--- Case testing
--- example (n : Nat) : n > 0 := by
---   structured simp
---   structured cases n 
---   case zero => sorry
+example : α → β ∧ γ → α ∧ β := by
+  intros ha hbg
+  have hb : β := hbg.left
+  exact And.intro ha hb
+
+example : α → β ∧ γ → α ∧ β := by
+  fix (ha : α) (hbg : β ∧ γ) ⊢ α ∧ β -- fix always uses intros
+  have hb : β := hbg.left
+  exact And.intro ha hb
+
+example : α → β ∧ γ → α ∧ β := by
+  note (ha : α) (hbg : β ∧ γ) (hb : β) ⊢ α ∧ β by
+    intros ha hbg
+    have hb : β := hbg.left
+  exact And.intro ha hb
+
+example : α → β ∧ γ → α ∧ β := by
+  intros ha hbg
+  have hb : β := hbg.left
+  show α ∧ β by 
+    exact And.intro ha hb
 
 
 example (n : Nat) : true := by
