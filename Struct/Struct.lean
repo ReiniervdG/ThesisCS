@@ -119,6 +119,7 @@ def mkNote (decls : Array LocalDecl := #[]) (optGoal : Option Term := none) (opt
 
 -- def mkCasesMatch
 -- def mkInductionMatch
+
 def mkCases (x : TSyntax ``casesTarget) (y : TSyntax ``binderIdent) : TermElabM (TSyntax ``tacticSeq) := do
   `(tacticSeq|
     cases $x

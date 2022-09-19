@@ -120,6 +120,13 @@ def strucBinderToId (b : TSyntax `strucBinder) : TermElabM (TSyntax [`ident, `Le
   | `(strucBinder| ($h:hole : $u:term)) => return h
   | _ => throwUnsupportedSyntax
 
+-- ## Map from state to necessary TSyntax objects
+def declToBinder (decl : LocalDecl) : TermElabM (TSyntax `strucBinder) := do
+  if decl.userName.hasMacroScopes then
+    return (← `(strucBinder|(_ : $(← delab decl.type))))
+  else 
+    return (← `(strucBinder|($(mkIdent decl.userName) : $(← delab decl.type))))
+
 -- ## Expand optional syntax structures to optional tacticSeq
 def expandStrucBy (osb : Option (TSyntax `strucBy)) : TermElabM (Option (TSyntax ``tacticSeq)) := do
   match osb with
@@ -157,6 +164,7 @@ elab &"note " bs:strucBinder* optStrucGoal:(strucGoal)? optStrucBy:(strucBy)? : 
     evalTactic tacSeq
   | none => logWarning "No tacSeq to run"
 
+-- TODO optional fix that the squigle line under fix is not the correct length, something about withRef
 elab &"fix " bs:strucBinder* strucGoal:strucGoal : tactic => do
   let ids ← bs.mapM (fun b => strucBinderToId b)
   evalTactic (← `(tactic|note $bs:strucBinder* $strucGoal:strucGoal by intros $[$ids]*))
