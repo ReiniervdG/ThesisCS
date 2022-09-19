@@ -47,22 +47,26 @@ def goalsToStateDiff (oldGoal : MVarId) (newGoal : MVarId) : TacticM StateDiff :
   let mut removedDecls := #[]
 
   for newDecl in newLCtx do
-    let mut foundMatch : Bool := false
-    for oldDecl in oldLCtx do
-      if newDecl.userName == oldDecl.userName then
-        foundMatch := true
-        if !(newDecl.type.consumeMData == oldDecl.type.consumeMData) then
-          changedDecls := changedDecls.push newDecl
-    if !foundMatch then
-      newDecls := newDecls.push newDecl
+    if !newDecl.isAuxDecl then
+      let mut foundMatch : Bool := false
+      for oldDecl in oldLCtx do
+        if !oldDecl.isAuxDecl then
+          if newDecl.userName == oldDecl.userName then
+            foundMatch := true
+            if !(newDecl.type.consumeMData == oldDecl.type.consumeMData) then
+              changedDecls := changedDecls.push newDecl
+      if !foundMatch then
+        newDecls := newDecls.push newDecl
 
   for oldDecl in oldLCtx do
-    let mut foundMatch : Bool := false
-    for newDecl in newLCtx do
-      if oldDecl.userName == newDecl.userName then
-        foundMatch := true
-    if !foundMatch then
-      removedDecls := removedDecls.push oldDecl
+    if !oldDecl.isAuxDecl then
+      let mut foundMatch : Bool := false
+      for newDecl in newLCtx do
+        if !newDecl.isAuxDecl then
+          if oldDecl.userName == newDecl.userName then
+            foundMatch := true
+      if !foundMatch then
+        removedDecls := removedDecls.push oldDecl
 
   return StateDiff.mk newlyChangedGoal newDecls changedDecls removedDecls
 
@@ -72,12 +76,6 @@ def getTacs (ts : TSyntax ``tacticSeq) : TermElabM (Array (TSyntax `tactic)) :=
   | `(tacticSeq| { $[$tacs:tactic $[;]?]* }) => return tacs
   | `(tacticSeq| $[$tacs:tactic $[;]?]*) => return tacs
   | _ => throwError "unknown syntax"
-
-def declToBinder (decl : LocalDecl) : TermElabM (TSyntax `strucBinder) := do
-  if decl.userName.hasMacroScopes then
-    return (← `(strucBinder|(_ : $(← delab decl.type))))
-  else 
-    return (← `(strucBinder|($(mkIdent decl.userName) : $(← delab decl.type))))
 
 -- TODO : strip original tacSeq of comments (optional)
 
@@ -158,6 +156,7 @@ def structuredCases (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (target : 
   --      * The stripped Name (e.g. `zero` for `Nat.zero`)
   --      * The number of arguments to add, or already a list of automatically generated names for each (prepended with the ctor name)
 
+  -- Automatically create names for arguments like `{indType}_{ctor}_`
 
   match target with
   | `(casesTarget|$targetTerm:term)
@@ -191,6 +190,18 @@ def structuredCases (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (target : 
           match ctorInfo with
           | some (.ctorInfo cval) =>
             addTrace `xx m!"Constructor {ctor} for inductive type {cval.induct} with numParams {cval.numParams}, numFields {cval.numFields}, with type repr: {repr cval.type}"
+            let (args, _, _) ← forallMetaTelescopeReducing cval.type
+            
+            -- TODO : maybe some synthesizing the arg mvars?
+
+            addTrace `xx m!"forallMetaTelescopeReducing output args: {args}"
+            for arg in args do
+              addTrace `xx m!"Attempt at arg0 repr: {repr arg}"
+              match arg with
+              | .mvar mvarId => 
+                addTrace `xx m!"MVarId name: {mvarId.name}, hasMacroScopes: {mvarId.name.hasMacroScopes}"
+                pure ()
+              | _ => pure ()
           | _ => 
             addTrace `xx m!"Unexpected 04"
         
@@ -276,6 +287,7 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
     -- TODO: Match on alternatives of existing structured tactics (from/by, etc)
     | #[t] =>
       match t with
+      -- Matching `suffices` Syntax
       | `(tactic|suffices $_ by $_) 
       | `(tactic|show $_ by $_) 
       | `(tactic|have $[$id]? : $_ := by $_) 
@@ -292,6 +304,7 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
       | `(tactic|cases $target:casesTarget)
       -- | `(tactic|induction $target)
         => 
+        
         addTrace `structured m!"Matched on cases or induction, specific implementation"
         structuredCases tacSeq goal target
         -- TEMP: passing to default to test non-specific case expansion
@@ -321,9 +334,10 @@ example : α → β → α := by
   -- fix (ha : α) (_ : β) ⊢ α
   exact ha
 
--- inductive Even : Nat → Prop
--- | zero : Even Nat.zero
--- | add_two : ∀ k : Nat, Even k → Even (k+2) 
+inductive Even : Nat → Prop
+| zero : Even Nat.zero
+| add_two : ∀ k : Nat, Even k → Even (k+2)
+| combine_two (k₁ : Nat) (hk1 : Even k₁) : ∀ k₂ : Nat, Even k₂ → Even (k₁ + k₂)
 
 -- example (n : Nat) (h : Even n): Even (n + 2) := by
 --   structured repeat apply Even.add_two _ _
@@ -334,7 +348,7 @@ example (h : α ∧ β) : α ∨ b := by
   structured 
     have ha : α := h.left
     have hb : β := h.right    
-    apply Or.intro_left _ ha
+  apply Or.intro_left _ ha
 
 example (n : Nat) : n = n := by
   structured cases n
@@ -342,6 +356,22 @@ example (n : Nat) : n = n := by
   -- | zero => rfl
   -- | succ m => rfl
   -- repeat rfl
+  sorry
+
+example (n : Nat) (h : Even n) : Even (n + n + 2) := by
+  structured cases h
+  -- case combine_two k1 k2 hk1 hk2 => 
+  --   sorry
+  
+  -- In case of induction, for each inductive type, we have to add some `ih` to the end of args
+  -- induction h
+  -- case combine_two k1 k2 hk1 hk2 ih1 ih2 => 
+
+  admit
+
+-- Realization, question 1: We need an argument for each `forallE` in the Expr tree
+-- Note 2: How do we know if something is inductive? ctor has info, but not for how many args are inductive
+-- Note 3: Something with forallTelescope, need to understand first
 
 
 example : α ↔ β := by
@@ -360,3 +390,4 @@ example : α ↔ β := by
 
 example : α ∧ β → β := by
   intro (⟨ha, hb⟩)
+  sorry
