@@ -231,7 +231,7 @@ def structureCasesDefault (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (new
     -- Major TODO: detect inaccessible local context, add to case statement
 
     -- Construct change annotation
-    let annotation ← mkNote #[] s.newlyChangedGoal none
+    let annotation ← mkNote (s.newDecls ++ s.changedDecls) s.newlyChangedGoal none
 
     -- Construct full case
     let caseId := mkIdent goalUserName
@@ -254,6 +254,8 @@ def structuredDefault (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) : Tactic
     addTrace `structured m!"Try this: {suggestion}"
   | [newGoal] => 
     let s ← goalsToStateDiff oldGoal newGoal
+
+    
 
     match (s.newlyChangedGoal, s.newDecls, s.changedDecls, s.removedDecls) with
     | (none, #[], #[], #[]) => 
@@ -375,8 +377,10 @@ example (n : Nat) (h : Even n) : Even (n + n + 2) := by
 
 
 example : α ↔ β := by
-  -- Is there a way of combining these cases in the application line?
-  structured apply Iff.intro
+  -- TODO currently the binderDecl (ha → ?a) contains an uninstantiated var
+  structured 
+    apply Iff.intro
+    intro ha
   case mp => sorry
   case mpr => sorry
 

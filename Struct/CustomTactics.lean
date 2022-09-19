@@ -123,7 +123,7 @@ def strucBinderToId (b : TSyntax `strucBinder) : TermElabM (TSyntax [`ident, `Le
 -- ## Map from state to necessary TSyntax objects
 def declToBinder (decl : LocalDecl) : TermElabM (TSyntax `strucBinder) := do
   if decl.userName.hasMacroScopes then
-    return (← `(strucBinder|(_ : $(← delab decl.type))))
+    return (← `(strucBinder|(_ : $(← delab (← instantiateMVars decl.type)))))
   else 
     return (← `(strucBinder|($(mkIdent decl.userName) : $(← delab decl.type))))
 
