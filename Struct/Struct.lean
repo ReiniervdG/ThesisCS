@@ -77,6 +77,12 @@ def getTacs (ts : TSyntax ``tacticSeq) : TermElabM (Array (TSyntax `tactic)) :=
   | `(tacticSeq| $[$tacs:tactic $[;]?]*) => return tacs
   | _ => throwError "unknown syntax"
 
+def getUniqueIdent : TermElabM (TSyntax `ident) := do
+  return mkIdent "tmp0"
+
+def getIdentWithSuggestion (suggestion : name) : TermElabM (TSyntax `ident) := do
+  return mkIdent "tmp"
+
 -- TODO : strip original tacSeq of comments (optional)
 
 -- ## State to tactic(Seq) builders
@@ -142,8 +148,19 @@ def structuredIntros (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) : TacticM
     | _ => throwError "Unexpected state: {StateDiff.toMessageData s}"
   | _ => throwError "Unexpected state: Multiple goals after executing intro statement"
 
-def structuredCases (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (target : TSyntax `term) : TacticM Unit :=
+-- TODO: Exactly same as induction, except the list of induction names generated and used in result, maybe add bool whether it is included
+def structuredCases (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (target : TSyntax `term) (isInduction : Bool) : TacticM Unit :=
   oldGoal.withContext do
+    -- For every constructor we need
+    -- 1) the name to use in the case statement (e.g. `succ` or `cons`)
+    -- 2) the constructor argument idents to be used (e.g. `n` or `someAutoUniqueName`)
+    -- 3) if induction, the induction hypothesis idents to be used (e.g. `ih1`, `autoUniqueIHName`)
+    let mut cases : Array (TSyntax ``inductionAlt) := #[]
+
+    let myStr : String := "Something"
+    let myIdent := mkIdent myStr
+    let x ← `(tactic|cases n with | $myIdent => sorry)
+
     let env ← getEnv
 
     let targetExpr ← elabTerm target none
@@ -160,38 +177,51 @@ def structuredCases (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (target : 
       match cstInfo with 
       | some (.inductInfo ival) => 
         let ctors := ival.ctors
-        -- for Nat, `ctors := [Nat.zero, Nat.succ]`
-        addTrace `xx m!"Constructors: {ctors}"
         
         for ctor in ctors do
           let ctorInfo := env.find? ctor
+
           match ctor with
-          | .str _ s => addTrace `xx m!"TMP: {s}"
-          | _ => pure ()
-          
-          match ctorInfo with
-          | some (.ctorInfo cval) =>
-            addTrace `xx m!"Constructor {ctor} for inductive type {cval.induct} with numParams {cval.numParams}, numFields {cval.numFields}, with type repr: {repr cval.type}"
-            -- let (args, _, _) ← forallMetaTelescopeReducing cval.type
-            let something ← forallTelescopeReducing cval.type fun args conclusion => do
-              for arg in args do
-                let fvar := arg.fvarId!
-                let decl ← fvar.getDecl
-                
-                if isAppOf decl.type fnName then
-                  addTrace `test m!"xx"
+          | .str _ s => 
+            let ctorIdent := mkIdent s
 
-                addTrace `test m!"{decl.userName} {decl.type} {fnName}"
+            match ctorInfo with
+            | some (.ctorInfo cval) =>
+              addTrace `xx m!"Constructor {ctor} for inductive type {cval.induct}"
+              let decls ← forallTelescopeReducing cval.type fun args _ => 
+                args.mapM (fun arg => arg.fvarId!.getDecl)
 
-          | _ => 
-            addTrace `xx m!"Unexpected 04"
-        
+              let mut ctorArgs : Array Ident := #[]
+              let mut indArgs : Array Ident := #[]
+
+              for decl in decls do
+                if decl.userName.hasMacroScopes then
+                  let ctorName ← getUnusedUserName (.str .anonymous "a")
+                  ctorArgs := ctorArgs.push (mkIdent ctorName)
+
+                  if isInduction ∧ isAppOf decl.type fnName then
+                    let indName ← getUnusedUserName (.str ctorName "ih")
+                    indArgs := indArgs.push (mkIdent indName)
+                else
+                  let ctorName ← getUnusedUserName decl.userName
+                  ctorArgs := ctorArgs.push (mkIdent ctorName)
+
+                  if isInduction ∧ isAppOf decl.type fnName then
+                    -- Use previous human-readable userIdent and attempt to make that + "ih"
+                    let indName ← getUnusedUserName (.str ctorName "ih")
+                    indArgs := indArgs.push (mkIdent indName)
+              cases := cases.push (← `(inductionAlt| | $ctorIdent $[$ctorArgs]* $[$indArgs]* => sorry))
+
+            | _ => addTrace `xx m!"Unexpected 04"
+          | _ => throwError "Unexpected error, constructor has no string name"  
+
+        -- TODO: How to add a `note` statement to a case, outstanding
+        let suggestion ← `(tactic| cases $target:term with $[$cases]*)
+        addTrace `structured m!"Try this: {suggestion}"
+
       | _ => 
         addTrace `xx m!"Unexpected error 03"
-
-    -- TODO: reaching this, elaboratedTerm is currently not a const
     | _ => addTrace `xx m!"Unexpected error 02, targetType: {repr targetType}, fnExpr: {repr fnExpr}"
-    -- | _ => addTrace `xx m!"Unexpected error 01 {repr target}"
 
 -- def structuredInduction
 -- Should be pretty similar to structuredCases, except with a different tacSeq match. Could potentially be combined, depending on construction of match statement
@@ -287,7 +317,7 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
       | `(tactic|induction $target:term)
         => 
         addTrace `structured m!"Matched on cases or induction, specific implementation"
-        structuredCases tacSeq goal target
+        structuredCases tacSeq goal target false -- todo set false or true based on induction
       | _ => structuredDefault tacSeq goal
     | _ => structuredDefault tacSeq goal
   | _ =>
