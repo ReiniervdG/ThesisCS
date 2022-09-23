@@ -203,25 +203,25 @@ def structureCasesDefault (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (new
   -- Construct a case for each new goal
   -- TODO : Move to separate function and use MapM
   for newGoal in newGoals do
-    let goalUserName := (← newGoal.getDecl).userName
-    
-    -- Compare newGoal to oldGoal
-    -- TODO new comparison implementation
     let s ← goalsToStateDiff oldGoal newGoal
 
-    -- Major TODO: detect inaccessible local context, add to case statement
+    -- Detect inaccessible local context, add to case statement
     -- For each decl in s.newDecls that hasMacroScopes
+    let mut caseArgs : Array (TSyntax ``binderIdent) := #[]
+    for decl in s.newDecls do
+      if decl.userName.hasMacroScopes then
+        caseArgs := caseArgs.push (← `(binderIdent|TODO))
 
     -- Construct change annotation
+    -- TODO: Use above caseArg names in this annotation
     let annotation ← mkNote (s.newDecls ++ s.changedDecls) s.newlyChangedGoal none
 
     -- Construct full case
-    let caseId := mkIdent goalUserName
     let caseIdName := mkIdent (← newGoal.getTag)
     let caseBinderId : TSyntax ``binderIdent ← `(binderIdent|$caseIdName:ident)
-    let case ← `(tactic|case $caseBinderId => 
+    let case ← `(tactic|case $caseBinderId $[$caseArgs]* => 
       $annotation:tactic
-      sorry) -- TODO: Currently adding sorry to make sure suggestion is actualy syntactically correct
+      sorry)
     cases := cases.push case  
   
   -- Append all 
@@ -406,6 +406,12 @@ example (n : Nat) : α ↔ β := by
   -- case mpr =>
   --   note ⊢ β → α
   --   sorry
+
+example (n : Nat) : n = n := by
+  structured 
+    cases n
+    try apply Even.zero
+  admit
 
 example : α ∧ β → β := by
   -- structured intro (⟨ha, hb⟩) 
