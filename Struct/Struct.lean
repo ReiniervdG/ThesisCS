@@ -142,56 +142,56 @@ def structuredIntros (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) : TacticM
     | _ => throwError "Unexpected state: {StateDiff.toMessageData s}"
   | _ => throwError "Unexpected state: Multiple goals after executing intro statement"
 
-def structuredCases (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (target : TSyntax `term) : TacticM Unit := do
-  let env ← getEnv
+def structuredCases (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (target : TSyntax `term) : TacticM Unit :=
+  oldGoal.withContext do
+    let env ← getEnv
 
-  let targetExpr ← elabTerm target none
-  let targetType ← inferType targetExpr
+    let targetExpr ← elabTerm target none
+    let targetType ← inferType targetExpr
 
-  -- Get expr of underlying function application
-  let fnExpr := getAppFn targetType
+    -- Get expr of underlying function application
+    let fnExpr := getAppFn targetType
 
-  -- Match that Expr with its name in the environment
-  match fnExpr with
-  | .const fnName _ => 
-    let cstInfo := env.find? fnName
+    -- Match that Expr with its name in the environment
+    match fnExpr with
+    | .const fnName _ => 
+      let cstInfo := env.find? fnName
 
-    match cstInfo with 
-    | some (.inductInfo ival) => 
-      let ctors := ival.ctors
-      -- for Nat, `ctors := [Nat.zero, Nat.succ]`
-      addTrace `xx m!"Constructors: {ctors}"
-      
-      for ctor in ctors do
-        let ctorInfo := env.find? ctor
-        match ctor with
-        | .str _ s => addTrace `xx m!"TMP: {s}"
-        | _ => pure ()
+      match cstInfo with 
+      | some (.inductInfo ival) => 
+        let ctors := ival.ctors
+        -- for Nat, `ctors := [Nat.zero, Nat.succ]`
+        addTrace `xx m!"Constructors: {ctors}"
         
-        match ctorInfo with
-        | some (.ctorInfo cval) =>
-          addTrace `xx m!"Constructor {ctor} for inductive type {cval.induct} with numParams {cval.numParams}, numFields {cval.numFields}, with type repr: {repr cval.type}"
-          let (args, _, _) ← forallMetaTelescopeReducing cval.type
+        for ctor in ctors do
+          let ctorInfo := env.find? ctor
+          match ctor with
+          | .str _ s => addTrace `xx m!"TMP: {s}"
+          | _ => pure ()
           
-          -- TODO : maybe some synthesizing the arg mvars?
+          match ctorInfo with
+          | some (.ctorInfo cval) =>
+            addTrace `xx m!"Constructor {ctor} for inductive type {cval.induct} with numParams {cval.numParams}, numFields {cval.numFields}, with type repr: {repr cval.type}"
+            -- let (args, _, _) ← forallMetaTelescopeReducing cval.type
+            let something ← forallTelescopeReducing cval.type fun args conclusion => do
+              for arg in args do
+                let fvar := arg.fvarId!
+                let decl ← fvar.getDecl
+                
+                if isAppOf decl.type fnName then
+                  addTrace `test m!"xx"
 
-          addTrace `xx m!"forallMetaTelescopeReducing output args: {args}"
-          for arg in args do
-            addTrace `xx m!"Attempt at arg0 repr: {repr arg}"
-            match arg with
-            | .mvar mvarId => 
-              addTrace `xx m!"MVarId name: {mvarId.name}, hasMacroScopes: {mvarId.name.hasMacroScopes}"
-              pure ()
-            | _ => pure ()
-        | _ => 
-          addTrace `xx m!"Unexpected 04"
-      
-    | _ => 
-      addTrace `xx m!"Unexpected error 03"
+                addTrace `test m!"{decl.userName} {decl.type} {fnName}"
 
-  -- TODO: reaching this, elaboratedTerm is currently not a const
-  | _ => addTrace `xx m!"Unexpected error 02, targetType: {repr targetType}, fnExpr: {repr fnExpr}"
-  -- | _ => addTrace `xx m!"Unexpected error 01 {repr target}"
+          | _ => 
+            addTrace `xx m!"Unexpected 04"
+        
+      | _ => 
+        addTrace `xx m!"Unexpected error 03"
+
+    -- TODO: reaching this, elaboratedTerm is currently not a const
+    | _ => addTrace `xx m!"Unexpected error 02, targetType: {repr targetType}, fnExpr: {repr fnExpr}"
+    -- | _ => addTrace `xx m!"Unexpected error 01 {repr target}"
 
 -- def structuredInduction
 -- Should be pretty similar to structuredCases, except with a different tacSeq match. Could potentially be combined, depending on construction of match statement
@@ -344,30 +344,31 @@ example (n : Nat) : n = n := by
 example (n : Nat) (h : Even n) : Even (n + n + 2) := by
   structured cases h
   
-  -- -- Make suggestion
-  match h with
-  | .zero =>
-    note ⊢ Even (Nat.zero + Nat.zero + 2)
-    sorry
-  | .add_two k autoName =>
-    note (k : Nat) (autoName : Even k) ⊢ Even (k + 2 + (k + 2) + 2)
-    sorry
-  | .combine_two k1 hk1 k2 autoName => 
-    note (k1 : Nat) (hk1 : Even k1) (k2 : Nat) (autoName : Even k2) ⊢ Even (k1 + k2 + (k1 + k2) + 2)
-    sorry
+  -- Make suggestion
+  -- match h with
+  -- | .zero =>
 
-  -- For induction make suggestion
-  -- induction h with
-  -- | zero =>
   --   note ⊢ Even (Nat.zero + Nat.zero + 2)
   --   sorry
-  -- | add_two k autoName autoNameIH =>
-  --   -- TODO : Add IH annotation
+  -- | .add_two k autoName =>
   --   note (k : Nat) (autoName : Even k) ⊢ Even (k + 2 + (k + 2) + 2)
   --   sorry
-  -- | combine_two k1 hk1 k2 autoName autoNameIH1 autoNameIH2 => 
+  -- | .combine_two k1 hk1 k2 autoName => 
   --   note (k1 : Nat) (hk1 : Even k1) (k2 : Nat) (autoName : Even k2) ⊢ Even (k1 + k2 + (k1 + k2) + 2)
   --   sorry
+
+  -- For induction make suggestion
+  induction h with
+  | zero =>
+    note ⊢ Even (Nat.zero + Nat.zero + 2)
+    sorry
+  | add_two k autoName autoNameIH =>
+    -- TODO : Add IH annotation
+    note (k : Nat) (autoName : Even k) ⊢ Even (k + 2 + (k + 2) + 2)
+    sorry
+  | combine_two k1 hk1 k2 autoName autoNameIH1 autoNameIH2 => 
+    note (k1 : Nat) (hk1 : Even k1) (k2 : Nat) (autoName : Even k2) ⊢ Even (k1 + k2 + (k1 + k2) + 2)
+    sorry
   
   -- OR 
   -- cases h
