@@ -313,11 +313,10 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
       | `(tactic|intros $ids*)
         => 
         structuredIntros tacSeq goal
-      | `(tactic|cases $target:term)
+      | `(tactic|cases $target:term) 
+        => structuredCases tacSeq goal target false
       | `(tactic|induction $target:term)
-        => 
-        addTrace `structured m!"Matched on cases or induction, specific implementation"
-        structuredCases tacSeq goal target false -- todo set false or true based on induction
+        => structuredCases tacSeq goal target true
       | _ => structuredDefault tacSeq goal
     | _ => structuredDefault tacSeq goal
   | _ =>
@@ -372,7 +371,7 @@ example (n : Nat) : n = n := by
   sorry
 
 example (n : Nat) (h : Even n) : Even (n + n + 2) := by
-  structured cases h
+  structured induction h
   
   -- Make suggestion
   -- match h with
