@@ -142,75 +142,56 @@ def structuredIntros (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) : TacticM
     | _ => throwError "Unexpected state: {StateDiff.toMessageData s}"
   | _ => throwError "Unexpected state: Multiple goals after executing intro statement"
 
-def structuredCases (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (target : TSyntax ``casesTarget) : TacticM Unit := do
-  -- Initial investigation: can we retrieve from the target and its specification in the env how to construct a match statement
-  -- (or even, how many declarations are constructed by each specific case, kind of num of ldecls with macroScopes)
+def structuredCases (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (target : TSyntax `term) : TacticM Unit := do
   let env ← getEnv
 
-  -- TODO: to create a cases tactic, we need all information at once, since we cannot seem to create a single `| _` element separately
-  let tmp ← `(tactic|cases n with | _ | succ m => rfl)
+  let targetExpr ← elabTerm target none
+  let targetType ← inferType targetExpr
 
-  -- For the final cases tactic, we need 
-  --   (1) casesTarget, which we already have
-  --   (2) A list of lines for each case
-  --      * The stripped Name (e.g. `zero` for `Nat.zero`)
-  --      * The number of arguments to add, or already a list of automatically generated names for each (prepended with the ctor name)
+  -- Get expr of underlying function application
+  let fnExpr := getAppFn targetType
 
-  -- Automatically create names for arguments like `{indType}_{ctor}_`
+  -- Match that Expr with its name in the environment
+  match fnExpr with
+  | .const fnName _ => 
+    let cstInfo := env.find? fnName
 
-  match target with
-  | `(casesTarget|$targetTerm:term)
-  | `(casesTarget|$_ : $targetTerm:term) =>
-    -- TODO: I get casesTarget as a term, but from what I've seen, I match the name of the case from the Expr.const
-    -- Elaborating this term does not seem to have the desired form
-    let targetExpr ← elabTerm targetTerm none
-    let targetType ← inferType targetExpr
-
-    -- Get expr of underlying function application
-    let fnExpr := getAppFn targetType
-
-    -- Match that Expr with its name in the environment
-    match fnExpr with
-    | .const fnName _ => 
-      let cstInfo := env.find? fnName
-
-      match cstInfo with 
-      | some (.inductInfo ival) => 
-        let ctors := ival.ctors
-        -- for Nat, `ctors := [Nat.zero, Nat.succ]`
-        addTrace `xx m!"Constructors: {ctors}"
+    match cstInfo with 
+    | some (.inductInfo ival) => 
+      let ctors := ival.ctors
+      -- for Nat, `ctors := [Nat.zero, Nat.succ]`
+      addTrace `xx m!"Constructors: {ctors}"
+      
+      for ctor in ctors do
+        let ctorInfo := env.find? ctor
+        match ctor with
+        | .str _ s => addTrace `xx m!"TMP: {s}"
+        | _ => pure ()
         
-        for ctor in ctors do
-          let ctorInfo := env.find? ctor
-          match ctor with
-          | .str _ s => addTrace `xx m!"TMP: {s}"
-          | _ => pure ()
+        match ctorInfo with
+        | some (.ctorInfo cval) =>
+          addTrace `xx m!"Constructor {ctor} for inductive type {cval.induct} with numParams {cval.numParams}, numFields {cval.numFields}, with type repr: {repr cval.type}"
+          let (args, _, _) ← forallMetaTelescopeReducing cval.type
           
+          -- TODO : maybe some synthesizing the arg mvars?
 
-          match ctorInfo with
-          | some (.ctorInfo cval) =>
-            addTrace `xx m!"Constructor {ctor} for inductive type {cval.induct} with numParams {cval.numParams}, numFields {cval.numFields}, with type repr: {repr cval.type}"
-            let (args, _, _) ← forallMetaTelescopeReducing cval.type
-            
-            -- TODO : maybe some synthesizing the arg mvars?
+          addTrace `xx m!"forallMetaTelescopeReducing output args: {args}"
+          for arg in args do
+            addTrace `xx m!"Attempt at arg0 repr: {repr arg}"
+            match arg with
+            | .mvar mvarId => 
+              addTrace `xx m!"MVarId name: {mvarId.name}, hasMacroScopes: {mvarId.name.hasMacroScopes}"
+              pure ()
+            | _ => pure ()
+        | _ => 
+          addTrace `xx m!"Unexpected 04"
+      
+    | _ => 
+      addTrace `xx m!"Unexpected error 03"
 
-            addTrace `xx m!"forallMetaTelescopeReducing output args: {args}"
-            for arg in args do
-              addTrace `xx m!"Attempt at arg0 repr: {repr arg}"
-              match arg with
-              | .mvar mvarId => 
-                addTrace `xx m!"MVarId name: {mvarId.name}, hasMacroScopes: {mvarId.name.hasMacroScopes}"
-                pure ()
-              | _ => pure ()
-          | _ => 
-            addTrace `xx m!"Unexpected 04"
-        
-      | _ => 
-        addTrace `xx m!"Unexpected error 03"
-
-    -- TODO: reaching this, elaboratedTerm is currently not a const
-    | _ => addTrace `xx m!"Unexpected error 02, targetType: {repr targetType}, fnExpr: {repr fnExpr}"
-  | _ => addTrace `xx m!"Unexpected error 01"
+  -- TODO: reaching this, elaboratedTerm is currently not a const
+  | _ => addTrace `xx m!"Unexpected error 02, targetType: {repr targetType}, fnExpr: {repr fnExpr}"
+  -- | _ => addTrace `xx m!"Unexpected error 01 {repr target}"
 
 -- def structuredInduction
 -- Should be pretty similar to structuredCases, except with a different tacSeq match. Could potentially be combined, depending on construction of match statement
@@ -229,6 +210,7 @@ def structureCasesDefault (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (new
     let s ← goalsToStateDiff oldGoal newGoal
 
     -- Major TODO: detect inaccessible local context, add to case statement
+    -- For each decl in s.newDecls that hasMacroScopes
 
     -- Construct change annotation
     let annotation ← mkNote (s.newDecls ++ s.changedDecls) s.newlyChangedGoal none
@@ -254,8 +236,6 @@ def structuredDefault (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) : Tactic
     addTrace `structured m!"Try this: {suggestion}"
   | [newGoal] => 
     let s ← goalsToStateDiff oldGoal newGoal
-
-    
 
     match (s.newlyChangedGoal, s.newDecls, s.changedDecls, s.removedDecls) with
     | (none, #[], #[], #[]) => 
@@ -303,14 +283,11 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
       | `(tactic|intros $ids*)
         => 
         structuredIntros tacSeq goal
-      | `(tactic|cases $target:casesTarget)
-      -- | `(tactic|induction $target)
+      | `(tactic|cases $target:term)
+      | `(tactic|induction $target:term)
         => 
-        
         addTrace `structured m!"Matched on cases or induction, specific implementation"
         structuredCases tacSeq goal target
-        -- TEMP: passing to default to test non-specific case expansion
-        -- structuredDefault tacSeq goal
       | _ => structuredDefault tacSeq goal
     | _ => structuredDefault tacSeq goal
   | _ =>
@@ -345,6 +322,10 @@ inductive Even : Nat → Prop
 --   structured repeat apply Even.add_two _ _
 --   exact h
 
+example (n : Nat) : n = n := by
+  structured induction n
+  admit
+
 
 example (h : α ∧ β) : α ∨ b := by
   structured 
@@ -362,22 +343,56 @@ example (n : Nat) : n = n := by
 
 example (n : Nat) (h : Even n) : Even (n + n + 2) := by
   structured cases h
-  -- case combine_two k1 k2 hk1 hk2 => 
+  
+  -- -- Make suggestion
+  match h with
+  | .zero =>
+    note ⊢ Even (Nat.zero + Nat.zero + 2)
+    sorry
+  | .add_two k autoName =>
+    note (k : Nat) (autoName : Even k) ⊢ Even (k + 2 + (k + 2) + 2)
+    sorry
+  | .combine_two k1 hk1 k2 autoName => 
+    note (k1 : Nat) (hk1 : Even k1) (k2 : Nat) (autoName : Even k2) ⊢ Even (k1 + k2 + (k1 + k2) + 2)
+    sorry
+
+  -- For induction make suggestion
+  -- induction h with
+  -- | zero =>
+  --   note ⊢ Even (Nat.zero + Nat.zero + 2)
+  --   sorry
+  -- | add_two k autoName autoNameIH =>
+  --   -- TODO : Add IH annotation
+  --   note (k : Nat) (autoName : Even k) ⊢ Even (k + 2 + (k + 2) + 2)
+  --   sorry
+  -- | combine_two k1 hk1 k2 autoName autoNameIH1 autoNameIH2 => 
+  --   note (k1 : Nat) (hk1 : Even k1) (k2 : Nat) (autoName : Even k2) ⊢ Even (k1 + k2 + (k1 + k2) + 2)
+  --   sorry
+  
+  -- OR 
+  -- cases h
+  -- case zero =>
+  --   note ⊢ Even (Nat.zero + Nat.zero + 2)
+  --   sorry
+  -- case add_two k hk =>
+  --   note (k : Nat) (hk : Even k) ⊢ Even (k + 2 + (k + 2) + 2)
+  --   sorry
+  -- case combine_two k1 hk1 k2 hk2 => 
+  --   note (k1 : Nat) (hk1 : Even k1) (k2 : Nat) (hk2 : Even k2) ⊢ Even (k1 + k2 + (k1 + k2) + 2)
   --   sorry
   
   -- In case of induction, for each inductive type, we have to add some `ih` to the end of args
   -- induction h
   -- case combine_two k1 k2 hk1 hk2 ih1 ih2 => 
 
-  admit
-
 -- Realization, question 1: We need an argument for each `forallE` in the Expr tree
 -- Note 2: How do we know if something is inductive? ctor has info, but not for how many args are inductive
 -- Note 3: Something with forallTelescope, need to understand first
 
 
-example : α ↔ β := by
+example (n : Nat) : α ↔ β := by
   -- TODO currently the binderDecl (ha → ?a) contains an uninstantiated var
+
   structured 
     apply Iff.intro
     intro ha
@@ -393,5 +408,7 @@ example : α ↔ β := by
   --   sorry
 
 example : α ∧ β → β := by
-  intro (⟨ha, hb⟩)
+  -- structured intro (⟨ha, hb⟩) 
+  
+  note (ha : α) (hb : β) ⊢ β by intro (⟨ha, hb⟩)
   sorry

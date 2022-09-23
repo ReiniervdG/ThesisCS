@@ -1,9 +1,9 @@
 import Struct.Struct
 
 -- Setup
-inductive Even : Nat → Prop
-| zero : Even Nat.zero
-| add_two : ∀ k : Nat, Even k → Even (k+2) 
+-- inductive Even : Nat → Prop
+-- | zero : Even Nat.zero
+-- | add_two : ∀ k : Nat, Even k → Even (k+2) 
 
 inductive Palindrome : List α → Prop
 | nil : Palindrome []
@@ -97,7 +97,6 @@ example : Even 4 := by
   structured 
     repeat apply Even.add_two _ _
     apply Even.zero
-  
 example : Even 4 := by
   show Even 4 by
     repeat 
@@ -134,21 +133,27 @@ example (as : List α) (pas : Palindrome as) : Palindrome (reverse as) := by
 
 -- Case xx : assert hypotheses and goals
 example : α → β → α := by
-  structured intro (ha : α)
-  assert_hyp : α
-  assert_hyp ha : α
-  -- assert_hyp : α → α -- should fail, no such hypothesis
-  -- assert_hyp : β -- should fail, β does not exist
-  -- assert_hyp : ha -- should fail, unknown identifier
-  
-  assert_goal α
-  -- assert_goal β -- should fail, β does not exist
-  -- assert_goal ha -- should fail, unknown identifier
-  -- assert_goal α → α -- should fail, types mismatch
+  -- structured intro (ha : α) hb
+  -- intros ha hb
+  note (ha : α) (hb : β) ⊢ α by 
+    intros ha hb
+  show α by
+    exact ha
 
-  -- fix (ha : α) ⊢ α
+  -- assertHyp : α
+  -- assertHyp ha : α
+  -- -- assert_hyp : α → α -- should fail, no such hypothesis
+  -- -- assert_hyp : β -- should fail, β does not exist
+  -- -- assert_hyp : ha -- should fail, unknown identifier
   
-  exact ha
+  -- assertGoal α
+  -- -- assert_goal β -- should fail, β does not exist
+  -- -- assert_goal ha -- should fail, unknown identifier
+  -- -- assert_goal α → α -- should fail, types mismatch
+
+  -- -- fix (ha : α) ⊢ α
+  
+  -- exact ha
 
 
 -- STRUCTURED TEST CASES FROM DIAGRAM
@@ -160,7 +165,7 @@ example : α → β → α := by
 -- Case 1b : Match on show, indented
 example : Even 0 := by
   structured 
-    show Even 0 by Even.zero
+    show Even 0 by Even.zero -- note, `show ..  by ..` does not seem to work
   
 -- Case 2 : Match on suffices
 -- Case 3 : Match on have

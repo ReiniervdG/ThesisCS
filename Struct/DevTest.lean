@@ -5,109 +5,170 @@ set_option trace.debug true
 
 -- Try to get LoVe Hoare logic definition and lemma to Lean 4
 
--- Lean 3:
-def myState : Type :=
+namespace LoVe
+
+def state : Type :=
   String → Nat
-
-def state.update (name : String) (val : Nat) (s : myState) : myState :=
+def state.update (name : String) (val : Nat) (s : state) : state := 
   fun name' => if name' = name then val else s name'
-
 notation s " { " name " ↦ " val " } " => state.update name val s
 
 inductive stmt : Type
 | skip   : stmt
-| assign : String → (myState → Nat) → stmt
+| assign : String → (state → Nat) → stmt
 | seq    : stmt → stmt → stmt
-| ite    : (myState → Prop) → stmt → stmt → stmt
-| while_renamed  : (myState → Prop) → stmt → stmt
-
+| ite    : (state → Prop) → stmt → stmt → stmt
+| while_tmp  : (state → Prop) → stmt → stmt
 infixl:90 " ;; " => stmt.seq
 
-inductive big_step : stmt × myState → myState → Prop
+inductive big_step : stmt → state → state → Prop
 | skip {s} :
-  big_step (stmt.skip, s) s
+  big_step stmt.skip s s
 | assign {x a s} :
-  big_step (stmt.assign x a, s) (s{x ↦ a s}) -- `s{x ↦ a s}`
-| seq {S T s t u} (hS : big_step (S, s) t)
-    (hT : big_step (T, t) u) :
-  big_step (S ;; T, s) u
-| ite_true {b : myState → Prop} {S T s t} (hcond : b s)
-    (hbody : big_step (S, s) t) :
-  big_step (stmt.ite b S T, s) t
-| ite_false {b : myState → Prop} {S T s t} (hcond : ¬ b s)
-    (hbody : big_step (T, s) t) :
-  big_step (stmt.ite b S T, s) t
-| while_true {b : myState → Prop} {S s t u} (hcond : b s)
-    (hbody : big_step (S, s) t)
-    (hrest : big_step (stmt.while_renamed b S, t) u) :
-  big_step (stmt.while_renamed b S, s) u
-| while_false {b : myState → Prop} {S s} (hcond : ¬ b s) :
-  big_step (stmt.while_renamed b S, s) s
+  big_step (stmt.assign x a) s (s{x ↦ a s})
+| seq {S T s t u} (hS : big_step S s t)
+    (hT : big_step T t u) :
+  big_step (S ;; T) s u
+| ite_true {b : state → Prop} {S T s t} (hcond : b s)
+    (hbody : big_step S s t) :
+  big_step (stmt.ite b S T) s t
+| ite_false {b : state → Prop} {S T s t} (hcond : ¬ b s)
+    (hbody : big_step T s t) :
+  big_step (stmt.ite b S T) s t
+| while_true {b : state → Prop} {S s t u} (hcond : b s)
+    (hbody : big_step S s t)
+    (hrest : big_step (stmt.while_tmp b S) t u) :
+  big_step (stmt.while_tmp b S) s u
+| while_false {b : state → Prop} {S s} (hcond : ¬ b s) :
+  big_step (stmt.while_tmp b S) s s
+infix:110 " ⟹ " => big_step
 
-infix:110    " ⟹ " => big_step
+-- NOTE: cannot do induction on hl if it's made with stmt × state and infix ⟹
+-- Then we get error `index in target type not a variable, (S, s)`
+theorem big_step_deterministic {S s l r} (hl : big_step S s l) (hr : big_step S s r) : l = r := by
+  induction hl 
+  case skip => 
+    cases hr
+    rfl
+  case assign =>
+    cases hr
+    rfl
+  case seq S T s t l hS hT ihS ihT =>
+    cases hr
+    admit -- TODO
+  case ite_true b S T s t hb hS ih =>
+    cases hr
+    case ite_true x1 x2 x3 x4 => 
+      apply ih x4 -- In lean 3, after using `cases' hr`, they still use `hr` at the underscore. In Lean 4 `hr` does not exist anymore
+    case ite_false =>
+      admit -- cc
+  case ite_false b S T s t hb hT ih =>
+    cases hr
+    case ite_true =>
+      admit -- cc
+    case ite_false x1 x2 x3 x4 =>
+      apply ih x4
+  case while_true b S s t u hb hS hw ihS ihw =>
+    cases hr
+    case while_true x1 x2 x3 x4 x5 x6 =>
+      admit -- bit weird 
+      -- cases ihS _
+      -- cases ihw _
+      -- rfl
+    case while_false =>
+      admit -- cc
+  case while_false =>
+    cases hr
+    case while_true =>
+      admit -- cc
+    case while_false =>
+      rfl
 
-def partial_hoare (P : myState → Prop) (S : stmt) (Q : myState → Prop) : Prop := 
-  ∀ s t, P s → (S, s) ⟹ t → Q t
-
-notation:110 " {* " P " *} " S " {* " Q " *} " => partial_hoare P S Q
-
-theorem skip_intro {P : myState → Prop} : {* P *} stmt.skip {* P *} := by
-  rw [partial_hoare]
-  intros s t hs hst
-  cases hst
-  assumption
-
-def while_intro' {b P Q : myState → Prop} {S}
-    (I : myState → Prop)
-    (hS : {* fun s => I s ∧ b s *} S {* I *})
-    (hP : ∀s, P s → I s)
-    (hQ : ∀s, ¬ b s → I s → Q s) :
-  {* P *} stmt.while_renamed b S {* Q *} := by admit -- proof omitted
-
-def ADD : stmt :=
-stmt.while_renamed (fun s => s "n" ≠ 0)
-  (stmt.assign "n" (fun s => s "n" - 1) ;;
-   stmt.assign "m" (fun s => s "m" + 1))
-
--- TODO, can't get `while_intro'` to work
--- theorem ADD_correct (n₀ m₀ : Nat) :
---   {* fun s => s "n" = n₀ ∧ s "m" = m₀ *}
---   ADD
---   {* fun s => s "n" = 0 ∧ s "m" = n₀ + m₀ *} :=
---   while_intro' (fun s => s "n" + s "m" = n₀ + m₀)
---   by admit
-
-inductive small_step : stmt × myState → stmt × myState → Prop
-| assign {x a s} :
-  small_step (stmt.assign x a, s) (stmt.skip, s{x ↦ a s})
-| seq_step {S S' T s s'} (hS : small_step (S, s) (S', s')) :
-  small_step (S ;; T, s) (S' ;; T, s')
-| seq_skip {T s} :
-  small_step (stmt.skip ;; T, s) (T, s)
-| ite_true {b : myState → Prop} {S T s} (hcond : b s) :
-  small_step (stmt.ite b S T, s) (S, s)
-| ite_false {b : myState → Prop} {S T s} (hcond : ¬ b s) :
-  small_step (stmt.ite b S T, s) (T, s)
-| while_renamed {b : myState → Prop} {S s} :
-  small_step (stmt.while_renamed b S, s)
-    (stmt.ite b (S ;; stmt.while_renamed b S) stmt.skip, s)
-
-infixr:60 " ⇒ " => small_step
+@[simp] theorem big_step_skip_iff {s t} : big_step stmt.skip s t ↔ t = s := by
+  apply Iff.intro
+  case mp =>
+    intro h
+    cases h with
+    | skip => rfl
+  case mpr =>
+    intro h
+    admit
+    --exact big_step.skip _ _
 
 
--- Maybe small step semantics better, larger proofs and can do pretty nice annotations here without too much custom notation
+-- def partial_hoare (P : state → Prop) (S : stmt) (Q : state → Prop) : Prop := 
+--   ∀ s t, P s → (S, s) ⟹ t → Q t
+
+-- notation:110 " {* " P " *} " S " {* " Q " *} " => partial_hoare P S Q
+
+-- theorem skip_intro {P : state → Prop} : {* P *} stmt.skip {* P *} := by
+--   rw [partial_hoare]
+--   intros s t hs hst
+--   cases hst
+--   assumption
+
+-- def while_intro (P : state → Prop) {b : state → Prop} {S}
+--   (h : {* fun s => P s ∧ b s *} S {* P *}) :
+--   {* P *} stmt.while_tmp b S {* fun s => P s ∧ ¬ b s *} := by
+--     intros s t hs hst
+    
+--     admit -- TODO
+
+-- def while_intro' {b P Q : state → Prop} {S}
+--     (I : state → Prop)
+--     (hS : {* fun s => I s ∧ b s *} S {* I *})
+--     (hP : ∀s, P s → I s)
+--     (hQ : ∀s, ¬ b s → I s → Q s) :
+--   {* P *} stmt.while_tmp b S {* Q *} := by admit -- proof omitted
+
+-- def ADD : stmt :=
+-- stmt.while_tmp (fun s => s "n" ≠ 0)
+--   (stmt.assign "n" (fun s => s "n" - 1) ;;
+--    stmt.assign "m" (fun s => s "m" + 1))
+
+-- -- TODO, can't get `while_intro'` to work
+-- -- theorem ADD_correct (n₀ m₀ : Nat) :
+-- --   {* fun s => s "n" = n₀ ∧ s "m" = m₀ *}
+-- --   ADD
+-- --   {* fun s => s "n" = 0 ∧ s "m" = n₀ + m₀ *} :=
+-- --   while_intro (fun s : state => s "n" + s "m" = n₀ + m₀)
+-- --   by admit
+
+-- inductive small_step : stmt × state → stmt × state → Prop
+-- | assign {x a s} :
+--   small_step (stmt.assign x a, s) (stmt.skip, s{x ↦ a s})
+-- | seq_step {S S' T s s'} (hS : small_step (S, s) (S', s')) :
+--   small_step (S ;; T, s) (S' ;; T, s')
+-- | seq_skip {T s} :
+--   small_step (stmt.skip ;; T, s) (T, s)
+-- | ite_true {b : state → Prop} {S T s} (hcond : b s) :
+--   small_step (stmt.ite b S T, s) (S, s)
+-- | ite_false {b : state → Prop} {S T s} (hcond : ¬ b s) :
+--   small_step (stmt.ite b S T, s) (T, s)
+-- | while {b : state → Prop} {S s} :
+--   small_step (stmt.while_tmp b S, s)
+--     (stmt.ite b (S ;; stmt.while_tmp b S) stmt.skip, s)
+
+-- infixr:60 " ⇒ " => small_step
+
+
+-- example : ¬ p := by
+
+-- -- Maybe small step semantics better, larger proofs and can do pretty nice annotations here without too much custom notation
 -- theorem small_step_final (S s) :
 --   (¬ ∃T t, (S, s) ⇒ (T, t)) ↔ S = stmt.skip := by 
 --   induction S with 
 --   | skip =>
---     suffices ¬∃ T t, (stmt.skip, s) ⇒ (T, t) by
---       simp
-    
---     intros x
---   | assign x a => sorry
+--     simp [Not]
+--     intros T t hst
+--     admit
+
+--   | assign x a => 
+--     simp [Not]
+--     apply Exists.intro (fun x => false)
 --   | seq S T ihS ihT => sorry
 --   | ite b S T ihS ihT => sorry
---   | while_renamed b S ih => sorry
+--   | while_tmp b S ih => sorry
     
 -- begin
 --   induction' S,
@@ -152,8 +213,8 @@ infixr:60 " ⇒ " => small_step
 --     apply exists.intro s,
 --     exact small_step.while }
 -- end
+end LoVe
 
---
 
 example : α → β ∧ γ → α ∧ β := by
   intros ha hbg

@@ -54,6 +54,7 @@ def assertGoal (goalType : TSyntax `term) : TacticM Unit := withMainContext do
 elab &"assertGoal " t:term : tactic =>
   assertGoal t
 
+-- TODO: If we check a named hyp, but the name does not exist in ctx, but an unnamed hyp of that type exists, rename it
 def assertHyp (hypName : Option (TSyntax `ident) := none) (hypType : TSyntax `term) : TacticM Unit := withMainContext do
   let hypExpr ← elabTerm hypType none
   let mainGoal ← getMainGoal
@@ -71,7 +72,7 @@ def assertHyp (hypName : Option (TSyntax `ident) := none) (hypType : TSyntax `te
         if ldecl.type.consumeMData == hypExpr.consumeMData then
           return
         else
-          throwError "Found named hypothesis, but types do not match"
+          throwError "Found named hypothesis, but types do not match, {ldecl.type} vs {hypExpr}"
     throwError "Cannot find named hypothesis TODO of type TODO"
 
 elab &"assertHyp " hypName:(ident)? " : " hypType:term : tactic =>
