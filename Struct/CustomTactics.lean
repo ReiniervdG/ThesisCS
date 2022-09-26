@@ -126,7 +126,7 @@ def declToBinder (decl : LocalDecl) : TermElabM (TSyntax `strucBinder) := do
   if decl.userName.hasMacroScopes then
     return (← `(strucBinder|(_ : $(← delab (← instantiateMVars decl.type)))))
   else 
-    return (← `(strucBinder|($(mkIdent decl.userName) : $(← delab decl.type))))
+    return (← `(strucBinder|($(mkIdent decl.userName) : $(← delab (← instantiateMVars decl.type)))))
 
 -- ## Expand optional syntax structures to optional tacticSeq
 def expandStrucBy (osb : Option (TSyntax `strucBy)) : TermElabM (Option (TSyntax ``tacticSeq)) := do

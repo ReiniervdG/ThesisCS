@@ -148,8 +148,8 @@ def structuredIntros (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) : TacticM
     | _ => throwError "Unexpected state: {StateDiff.toMessageData s}"
   | _ => throwError "Unexpected state: Multiple goals after executing intro statement"
 
--- TODO: Exactly same as induction, except the list of induction names generated and used in result, maybe add bool whether it is included
-def structuredCases (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (target : TSyntax `term) (isInduction : Bool) : TacticM Unit :=
+-- TODO : Refactor out stuff
+def structuredCasesOrInduction (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (target : TSyntax `term) (isInduction : Bool) : TacticM Unit :=
   oldGoal.withContext do
     -- For every constructor we need
     -- 1) the name to use in the case statement (e.g. `succ` or `cons`)
@@ -187,7 +187,6 @@ def structuredCases (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (target : 
 
             match ctorInfo with
             | some (.ctorInfo cval) =>
-              addTrace `xx m!"Constructor {ctor} for inductive type {cval.induct}"
               let decls ← forallTelescopeReducing cval.type fun args _ => 
                 args.mapM (fun arg => arg.fvarId!.getDecl)
 
@@ -197,34 +196,48 @@ def structuredCases (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (target : 
               for decl in decls do
                 if decl.userName.hasMacroScopes then
                   let ctorName ← getUnusedUserName (.str .anonymous "a")
+                  -- TODO: We're working 'withContext' anyways, is there an easier way to get lctx?
+                  let ctorNameNative := (← oldGoal.getDecl).lctx.getUnusedName (.str .anonymous "a")
+                  addTrace `xx m!"Jannis Name: {ctorName}, Native Name: {ctorNameNative}"
                   ctorArgs := ctorArgs.push (mkIdent ctorName)
 
                   if isInduction ∧ isAppOf decl.type fnName then
                     let indName ← getUnusedUserName (.str ctorName "ih")
+                    let indNameNative := (← oldGoal.getDecl).lctx.getUnusedName (.str ctorNameNative "ih")
+                    addTrace `xx m!"Jannis Name: {indName}, Native Name: {indNameNative}"
                     indArgs := indArgs.push (mkIdent indName)
                 else
                   let ctorName ← getUnusedUserName decl.userName
+                  let ctorNameNative := (← oldGoal.getDecl).lctx.getUnusedName decl.userName
+                  addTrace `xx m!"Jannis Name: {ctorName}, Native Name: {ctorNameNative}"
                   ctorArgs := ctorArgs.push (mkIdent ctorName)
 
                   if isInduction ∧ isAppOf decl.type fnName then
                     -- Use previous human-readable userIdent and attempt to make that + "ih"
                     let indName ← getUnusedUserName (.str ctorName "ih")
+                    let indNameNative := (← oldGoal.getDecl).lctx.getUnusedName (.str ctorNameNative "ih")
+                    addTrace `xx m!"Jannis Name: {indName}, Native Name: {indNameNative}"
                     indArgs := indArgs.push (mkIdent indName)
-              cases := cases.push (← `(inductionAlt| | $ctorIdent $[$ctorArgs]* $[$indArgs]* => sorry))
+              -- Idea: Execute cases/induction with ONLY this case, then compare states
+              -- TODO: sorry excuses the goal, we need to have some 'doNothing' tactic for this
+              let case ← `(inductionAlt| | $ctorIdent $[$ctorArgs]* $[$indArgs]* => sorry)
+              cases := cases.push case
 
             | _ => addTrace `xx m!"Unexpected 04"
           | _ => throwError "Unexpected error, constructor has no string name"  
 
         -- TODO: How to add a `note` statement to a case, outstanding
-        let suggestion ← `(tactic| cases $target:term with $[$cases]*)
-        addTrace `structured m!"Try this: {suggestion}"
+        match isInduction with
+        | true =>
+          let suggestion ← `(tactic| induction $target:term with $[$cases]*)
+          addTrace `structured m!"Try this: {suggestion}"
+        | false => 
+          let suggestion ← `(tactic| cases $target:term with $[$cases]*)
+          addTrace `structured m!"Try this: {suggestion}"
 
       | _ => 
         addTrace `xx m!"Unexpected error 03"
     | _ => addTrace `xx m!"Unexpected error 02, targetType: {repr targetType}, fnExpr: {repr fnExpr}"
-
--- def structuredInduction
--- Should be pretty similar to structuredCases, except with a different tacSeq match. Could potentially be combined, depending on construction of match statement
 
 -- structuredCasesDefault: When multiple post-goals, but no match on cases or induction
 def structureCasesDefault (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (newGoals : List MVarId) : TacticM Unit := do
@@ -314,9 +327,9 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
         => 
         structuredIntros tacSeq goal
       | `(tactic|cases $target:term) 
-        => structuredCases tacSeq goal target false
+        => structuredCasesOrInduction tacSeq goal target false
       | `(tactic|induction $target:term)
-        => structuredCases tacSeq goal target true
+        => structuredCasesOrInduction tacSeq goal target true
       | _ => structuredDefault tacSeq goal
     | _ => structuredDefault tacSeq goal
   | _ =>
@@ -364,11 +377,15 @@ example (h : α ∧ β) : α ∨ b := by
 
 example (n : Nat) : n = n := by
   structured cases n
+  cases n with
+  | zero =>
+    sorry
+  | succ n_1 =>
+    sorry
   -- cases n with
   -- | zero => rfl
   -- | succ m => rfl
   -- repeat rfl
-  sorry
 
 example (n : Nat) (h : Even n) : Even (n + n + 2) := by
   structured induction h
@@ -442,9 +459,12 @@ example (n : Nat) : n = n := by
     cases n
     try apply Even.zero
   admit
+  admit
 
 example : α ∧ β → β := by
   -- structured intro (⟨ha, hb⟩) 
   
   note (ha : α) (hb : β) ⊢ β by intro (⟨ha, hb⟩)
   sorry
+
+#check LocalContext

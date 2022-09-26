@@ -5,6 +5,12 @@ set_option trace.debug true
 
 -- Try to get LoVe Hoare logic definition and lemma to Lean 4
 
+example (n : Nat) : n = n := by
+  -- suggests
+  induction n with
+  | zero => sorry
+  | succ n_1 n_1.ih => sorry
+
 namespace LoVe
 
 def state : Type :=
