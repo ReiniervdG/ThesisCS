@@ -195,32 +195,24 @@ def structuredCasesOrInduction (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId)
 
               for decl in decls do
                 if decl.userName.hasMacroScopes then
-                  let ctorName ← getUnusedUserName (.str .anonymous "a")
                   -- TODO: We're working 'withContext' anyways, is there an easier way to get lctx?
-                  let ctorNameNative := (← oldGoal.getDecl).lctx.getUnusedName (.str .anonymous "a")
-                  addTrace `xx m!"Jannis Name: {ctorName}, Native Name: {ctorNameNative}"
+                  let ctorName := (← oldGoal.getDecl).lctx.getUnusedName (.str .anonymous "a")
                   ctorArgs := ctorArgs.push (mkIdent ctorName)
 
                   if isInduction ∧ isAppOf decl.type fnName then
-                    let indName ← getUnusedUserName (.str ctorName "ih")
-                    let indNameNative := (← oldGoal.getDecl).lctx.getUnusedName (.str ctorNameNative "ih")
-                    addTrace `xx m!"Jannis Name: {indName}, Native Name: {indNameNative}"
+                    let indName := (← oldGoal.getDecl).lctx.getUnusedName (.str ctorName "ih")
                     indArgs := indArgs.push (mkIdent indName)
                 else
-                  let ctorName ← getUnusedUserName decl.userName
-                  let ctorNameNative := (← oldGoal.getDecl).lctx.getUnusedName decl.userName
-                  addTrace `xx m!"Jannis Name: {ctorName}, Native Name: {ctorNameNative}"
+                  let ctorName := (← oldGoal.getDecl).lctx.getUnusedName decl.userName
                   ctorArgs := ctorArgs.push (mkIdent ctorName)
 
                   if isInduction ∧ isAppOf decl.type fnName then
                     -- Use previous human-readable userIdent and attempt to make that + "ih"
-                    let indName ← getUnusedUserName (.str ctorName "ih")
-                    let indNameNative := (← oldGoal.getDecl).lctx.getUnusedName (.str ctorNameNative "ih")
-                    addTrace `xx m!"Jannis Name: {indName}, Native Name: {indNameNative}"
+                    let indName := (← oldGoal.getDecl).lctx.getUnusedName (.str ctorName "ih")
                     indArgs := indArgs.push (mkIdent indName)
+              
               -- Idea: Execute cases/induction with ONLY this case, then compare states
-              -- TODO: sorry excuses the goal, we need to have some 'doNothing' tactic for this
-              let case ← `(inductionAlt| | $ctorIdent $[$ctorArgs]* $[$indArgs]* => sorry)
+              let case ← `(inductionAlt| | $ctorIdent $[$ctorArgs]* $[$indArgs]* => skip)
               cases := cases.push case
 
             | _ => addTrace `xx m!"Unexpected 04"
@@ -387,7 +379,7 @@ example (n : Nat) : n = n := by
   -- | succ m => rfl
   -- repeat rfl
 
-example (n : Nat) (h : Even n) : Even (n + n + 2) := by
+example (n k₁ : Nat) (h : Even n) : Even (n + n + 2) := by
   structured induction h
   
   -- Make suggestion
