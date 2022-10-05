@@ -103,15 +103,15 @@ example : Even 4 := by
       apply Even.add_two _ _
     apply Even.zero
 
-example (as : List α) (pas : Palindrome as) : Palindrome (reverse as) := by
-  structured induction as
-  case nil =>
-    simp only [reverse]
-    exact pas
-  case cons _a _as _ih =>
-    simp only [reverse]
+-- example (as : List α) (pas : Palindrome as) : Palindrome (reverse as) := by
+--   structured induction as
+--   case nil =>
+--     simp only [reverse]
+--     exact pas
+--   case cons _a _as _ih =>
+--     simp only [reverse]
 
-    sorry
+--     sorry
 
 -- example (as : List α) (pas : Palindrome as) : Palindrome (reverse as) := by
 --   induction as with
@@ -163,9 +163,9 @@ example : α → β → α := by
 --     show Even 0 by Even.zero
 --   }
 -- Case 1b : Match on show, indented
-example : Even 0 := by
-  structured 
-    show Even 0 by Even.zero -- note, `show ..  by ..` does not seem to work
+-- example : Even 0 := by
+--   structured 
+--     show Even 0 by Even.zero -- note, `show ..  by ..` does not seem to work
   
 -- Case 2 : Match on suffices
 -- Case 3 : Match on have
@@ -197,3 +197,11 @@ example : α → β → α := by
 
 -- Case 13 : Single old/new goal, no change, no ctx change, suggest remove/leave out
 -- ... TODO
+
+set_option trace.Elab.induction true
+
+#eval Lean.versionString
+
+example (n : Nat) : n = n := by
+  induction n
+  repeat admit

@@ -23,7 +23,7 @@ set_option pp.rawOnError true
 
 structure StateDiff where
   newlyChangedGoal : Option Term
-  newDecls : Array LocalDecl
+  newDecls : Array LocalDecl -- TODO: Change LocalDecl to something that can't change
   changedDecls : Array LocalDecl
   removedDecls : Array LocalDecl
 
@@ -83,7 +83,13 @@ def getUniqueIdent : TermElabM (TSyntax `ident) := do
 def getIdentWithSuggestion (suggestion : name) : TermElabM (TSyntax `ident) := do
   return mkIdent "tmp"
 
--- TODO : strip original tacSeq of comments (optional)
+def replaceSkipWithNote (old : TSyntax ``inductionAlt) (note : TSyntax `tactic) : TermElabM (TSyntax ``inductionAlt) := do
+  match old with
+  | `(inductionAlt| | $lhs $[$ids]* => skip) => return ← `(inductionAlt| | $lhs $[$ids]* => 
+    $note:tactic
+    sorry)
+  | _ => 
+    throwError "Shouldnt reach"
 
 -- ## State to tactic(Seq) builders
 def mkShow (newGoalTerm : Term) (tacSeq : TSyntax ``tacticSeq) : TermElabM (TSyntax `tactic) := do
@@ -111,7 +117,7 @@ def mkNote (decls : Array LocalDecl := #[]) (optGoal : Option Term := none) (opt
   | some goal => 
     match optTacSeq with
     | some tacSeq => `(tactic|note $[$binders]* ⊢ $goal by $tacSeq)
-    | none => `(tactic|note $[$binders]* ⊢ $goal)
+    | none => `(tactic|show $[$binders]* ⊢ $goal)
   | none => 
     match optTacSeq with
     | some tacSeq => `(tactic|note $[$binders]* by $tacSeq)
@@ -149,87 +155,79 @@ def structuredIntros (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) : TacticM
   | _ => throwError "Unexpected state: Multiple goals after executing intro statement"
 
 -- TODO : Refactor out stuff
+-- def mkInductionAlt (goal : MVarId) (target : TSyntax `term) (cInfo : Option ConstantInfo) : TacticM (TSyntax ``inductionAlt) := 
+--   goal.withContext do 
+--     return (← `(inductionAlt| | $target => skip))
+
 def structuredCasesOrInduction (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (target : TSyntax `term) (isInduction : Bool) : TacticM Unit :=
   oldGoal.withContext do
-    -- For every constructor we need
-    -- 1) the name to use in the case statement (e.g. `succ` or `cons`)
-    -- 2) the constructor argument idents to be used (e.g. `n` or `someAutoUniqueName`)
-    -- 3) if induction, the induction hypothesis idents to be used (e.g. `ih1`, `autoUniqueIHName`)
     let mut cases : Array (TSyntax ``inductionAlt) := #[]
-
-    let myStr : String := "Something"
-    let myIdent := mkIdent myStr
-    let x ← `(tactic|cases n with | $myIdent => sorry)
 
     let env ← getEnv
 
     let targetExpr ← elabTerm target none
     let targetType ← inferType targetExpr
-
-    -- Get expr of underlying function application
     let fnExpr := getAppFn targetType
-
-    -- Match that Expr with its name in the environment
+    
     match fnExpr with
-    | .const fnName _ => 
-      let cstInfo := env.find? fnName
+    | .const fnName _ =>
 
-      match cstInfo with 
-      | some (.inductInfo ival) => 
-        let ctors := ival.ctors
-        
-        for ctor in ctors do
-          let ctorInfo := env.find? ctor
+      let ival ← getInductiveValFromMajor targetExpr
 
-          match ctor with
-          | .str _ s => 
-            let ctorIdent := mkIdent s
+      for ctor in ival.ctors do
+        let ctorInfo := env.find? ctor
 
-            match ctorInfo with
-            | some (.ctorInfo cval) =>
-              let decls ← forallTelescopeReducing cval.type fun args _ => 
-                args.mapM (fun arg => arg.fvarId!.getDecl)
+        match ctor with
+        | .str _ s => 
+          let ctorIdent := mkIdent s
 
-              let mut ctorArgs : Array Ident := #[]
-              let mut indArgs : Array Ident := #[]
+          match ctorInfo with
+          | some (.ctorInfo cval) =>
+            let decls ← forallTelescopeReducing cval.type fun args _ => 
+              args.mapM (fun arg => arg.fvarId!.getDecl)
 
-              for decl in decls do
-                if decl.userName.hasMacroScopes then
-                  -- TODO: We're working 'withContext' anyways, is there an easier way to get lctx?
-                  let ctorName := (← oldGoal.getDecl).lctx.getUnusedName (.str .anonymous "a")
-                  ctorArgs := ctorArgs.push (mkIdent ctorName)
+            let mut ctorArgs : Array Ident := #[]
+            let mut indArgs : Array Ident := #[]
 
-                  if isInduction ∧ isAppOf decl.type fnName then
-                    let indName := (← oldGoal.getDecl).lctx.getUnusedName (.str ctorName "ih")
-                    indArgs := indArgs.push (mkIdent indName)
-                else
-                  let ctorName := (← oldGoal.getDecl).lctx.getUnusedName decl.userName
-                  ctorArgs := ctorArgs.push (mkIdent ctorName)
+            for decl in decls do
+              if decl.userName.hasMacroScopes then
+                let ctorName := (← getLCtx).getUnusedName (.str .anonymous "a")
+                ctorArgs := ctorArgs.push (mkIdent ctorName)
 
-                  if isInduction ∧ isAppOf decl.type fnName then
-                    -- Use previous human-readable userIdent and attempt to make that + "ih"
-                    let indName := (← oldGoal.getDecl).lctx.getUnusedName (.str ctorName "ih")
-                    indArgs := indArgs.push (mkIdent indName)
-              
-              -- Idea: Execute cases/induction with ONLY this case, then compare states
-              let case ← `(inductionAlt| | $ctorIdent $[$ctorArgs]* $[$indArgs]* => skip)
-              cases := cases.push case
+                if isInduction ∧ isAppOf decl.type fnName then
+                  let indName := (← getLCtx).getUnusedName (.str ctorName "ih")
+                  indArgs := indArgs.push (mkIdent indName)
+              else
+                let ctorName := (← getLCtx).getUnusedName decl.userName
+                ctorArgs := ctorArgs.push (mkIdent ctorName)
 
-            | _ => addTrace `xx m!"Unexpected 04"
-          | _ => throwError "Unexpected error, constructor has no string name"  
+                if isInduction ∧ isAppOf decl.type fnName then
+                  -- Use previous human-readable userIdent and attempt to make that + "ih"
+                  let indName := (← getLCtx).getUnusedName (.str ctorName "ih")
+                  indArgs := indArgs.push (mkIdent indName)
+            
+            let case ← `(inductionAlt| | $ctorIdent $[$ctorArgs]* $[$indArgs]* => skip)
+            cases := cases.push case
 
-        -- TODO: How to add a `note` statement to a case, outstanding
-        match isInduction with
-        | true =>
-          let suggestion ← `(tactic| induction $target:term with $[$cases]*)
-          addTrace `structured m!"Try this: {suggestion}"
-        | false => 
-          let suggestion ← `(tactic| cases $target:term with $[$cases]*)
-          addTrace `structured m!"Try this: {suggestion}"
-
-      | _ => 
-        addTrace `xx m!"Unexpected error 03"
-    | _ => addTrace `xx m!"Unexpected error 02, targetType: {repr targetType}, fnExpr: {repr fnExpr}"
+          | _ => addTrace `xx m!"Unexpected state 02"
+          
+        | _ => addTrace `xx m!"Unexpected state 01"
+      
+      -- Do stuff with cases, find out mvars inside
+      match isInduction with
+      | true => 
+        let matchWithoutNotes ← `(tactic| induction $target:term with $[$cases]*)
+        let notes ← InductionHelper.getMVarsFromMatch oldGoal matchWithoutNotes isInduction
+        let casesWithNotes ← cases.zip notes |>.mapM (fun (case, note) => do replaceSkipWithNote case note)
+        let matchWithNotes ← `(tactic| induction $target:term with $[$casesWithNotes]*)
+        addTrace `test m!"Try this: {matchWithNotes}"
+      | false => 
+        let matchWithoutNotes ← `(tactic| cases $target:term with $[$cases]*)
+        let notes ← InductionHelper.getMVarsFromMatch oldGoal matchWithoutNotes isInduction
+        let casesWithNotes ← cases.zip notes |>.mapM (fun (case, note) => do replaceSkipWithNote case note)
+        let matchWithNotes ← `(tactic| cases $target:term with $[$casesWithNotes]*)
+        addTrace `test m!"Try this: {matchWithNotes}"
+    | _ => addTrace `xx m!"Unexpected state 00"
 
 -- structuredCasesDefault: When multiple post-goals, but no match on cases or induction
 def structureCasesDefault (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (newGoals : List MVarId) : TacticM Unit := do
@@ -237,7 +235,7 @@ def structureCasesDefault (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (new
 
   -- Construct a case for each new goal
   -- TODO : Move to separate function and use MapM
-  for newGoal in newGoals do
+  for newGoal in newGoals do 
     let s ← goalsToStateDiff oldGoal newGoal
 
     -- Detect inaccessible local context, add to case statement
@@ -245,7 +243,9 @@ def structureCasesDefault (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (new
     let mut caseArgs : Array (TSyntax ``binderIdent) := #[]
     for decl in s.newDecls do
       if decl.userName.hasMacroScopes then
-        caseArgs := caseArgs.push (← `(binderIdent|TODO))
+        let caseArgName := (← newGoal.getDecl).lctx.getUnusedName (.str .anonymous "a") 
+        let caseArgIdent := mkIdent caseArgName
+        caseArgs := caseArgs.push (← `(binderIdent|$caseArgIdent:ident))
 
     -- Construct change annotation
     -- TODO: Use above caseArg names in this annotation
@@ -350,15 +350,15 @@ example : α → β → α := by
 inductive Even : Nat → Prop
 | zero : Even Nat.zero
 | add_two : ∀ k : Nat, Even k → Even (k+2)
-| combine_two (k₁ : Nat) (hk1 : Even k₁) : ∀ k₂ : Nat, Even k₂ → Even (k₁ + k₂)
+| combine_two (n : Nat) (hn : Even n) : ∀ m : Nat, Even m → Even (n + m)
 
 -- example (n : Nat) (h : Even n): Even (n + 2) := by
 --   structured repeat apply Even.add_two _ _
 --   exact h
 
-example (n : Nat) : n = n := by
-  structured induction n
-  admit
+-- example (n : Nat) : n = n := by
+--   structured induction n
+--   admit
 
 
 example (h : α ∧ β) : α ∨ b := by
@@ -371,16 +371,30 @@ example (n : Nat) : n = n := by
   structured cases n
   cases n with
   | zero =>
+    show Nat.zero = Nat.zero
     sorry
   | succ n_1 =>
+    show (n_1 : Nat) ⊢ Nat.succ n_1 = Nat.succ n_1
     sorry
   -- cases n with
   -- | zero => rfl
   -- | succ m => rfl
   -- repeat rfl
 
-example (n k₁ : Nat) (h : Even n) : Even (n + n + 2) := by
+example (n : Nat) (h : Even n) : Even (n + n + 2) := by
   structured induction h
+   induction h with
+  | zero =>
+    show Even (Nat.zero + Nat.zero + 2)
+    sorry
+  | add_two k a a.ih =>
+    show (k : Nat) (a : Even k) (a.ih : Even (k + k + 2)) ⊢ Even (k + 2 + (k + 2) + 2)
+    sorry
+  | combine_two n_1 hn m a hn.ih a.ih =>
+    show (n_1 : Nat) (hn : Even n_1) (m : Nat) (a : Even m) (hn.ih : Even (n_1 + n_1 + 2)) 
+      (a.ih : Even (m + m + 2)) ⊢ Even (n_1 + m + (n_1 + m) + 2)
+    sorry
+  repeat admit
   
   -- Make suggestion
   -- match h with
@@ -396,18 +410,19 @@ example (n k₁ : Nat) (h : Even n) : Even (n + n + 2) := by
   --   sorry
 
   -- For induction make suggestion
-  induction h with
-  | zero =>
-    note ⊢ Even (Nat.zero + Nat.zero + 2)
-    sorry
-  | add_two k autoName autoNameIH =>
-    -- TODO : Add IH annotation
-    note (k : Nat) (autoName : Even k) ⊢ Even (k + 2 + (k + 2) + 2)
-    sorry
-  | combine_two k1 hk1 k2 autoName autoNameIH1 autoNameIH2 => 
-    note (k1 : Nat) (hk1 : Even k1) (k2 : Nat) (autoName : Even k2) ⊢ Even (k1 + k2 + (k1 + k2) + 2)
-    sorry
-  
+  -- induction h with
+  -- | zero =>
+  --   note ⊢ Even (Nat.zero + Nat.zero + 2)
+  --   sorry
+  -- | add_two k autoName autoNameIH =>
+  --   -- TODO : Add IH annotation
+  --   note (k : Nat) (autoName : Even k) ⊢ Even (k + 2 + (k + 2) + 2)
+  --   sorry
+  -- | combine_two k1 hk1 k2 autoName autoNameIH1 autoNameIH2 => 
+  --   note (k1 : Nat) (hk1 : Even k1) (k2 : Nat) (autoName : Even k2) ⊢ Even (k1 + k2 + (k1 + k2) + 2)
+  --   sorry  
+
+
   -- OR 
   -- cases h
   -- case zero =>
@@ -424,19 +439,14 @@ example (n k₁ : Nat) (h : Even n) : Even (n + n + 2) := by
   -- induction h
   -- case combine_two k1 k2 hk1 hk2 ih1 ih2 => 
 
--- Realization, question 1: We need an argument for each `forallE` in the Expr tree
--- Note 2: How do we know if something is inductive? ctor has info, but not for how many args are inductive
--- Note 3: Something with forallTelescope, need to understand first
 
 
 example (n : Nat) : α ↔ β := by
-  -- TODO currently the binderDecl (ha → ?a) contains an uninstantiated var
-
   structured 
     apply Iff.intro
-    intro ha
-  case mp => sorry
-  case mpr => sorry
+    intro _
+  case mp => admit
+  repeat admit
 
   -- apply Iff.intro
   -- case mp =>
@@ -448,10 +458,11 @@ example (n : Nat) : α ↔ β := by
 
 example (n : Nat) : n = n := by
   structured 
+    -- TODO: still weird name _uniq.num
+    -- TODO: annotation doesn't change with case suggestion
     cases n
     try apply Even.zero
-  admit
-  admit
+  repeat admit
 
 example : α ∧ β → β := by
   -- structured intro (⟨ha, hb⟩) 

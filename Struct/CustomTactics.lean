@@ -69,11 +69,11 @@ def assertHyp (hypName : Option (TSyntax `ident) := none) (hypType : TSyntax `te
     let hypNameExpr := hypName.getId
     for ldecl in lCtx do
       if ldecl.userName == hypNameExpr then
-        if ldecl.type.consumeMData == hypExpr.consumeMData then
+        if (← instantiateMVars ldecl.type).consumeMData == hypExpr.consumeMData then
           return
         else
           throwError "Found named hypothesis, but types do not match, {ldecl.type} vs {hypExpr}"
-    throwError "Cannot find named hypothesis TODO of type TODO"
+    throwError "Cannot find named hypothesis {hypName} of type {hypExpr}"
 
 elab &"assertHyp " hypName:(ident)? " : " hypType:term : tactic =>
   assertHyp hypName hypType
@@ -158,12 +158,19 @@ def expandStrucGoal (lhs : Option (TSyntax ``tacticSeq)) (osg : Option (TSyntax 
   | none =>
     return lhs 
 
-elab &"note " bs:strucBinder* optStrucGoal:(strucGoal)? optStrucBy:(strucBy)? : tactic => do
-  match (← expandStrucGoal (← expandBinders (← expandStrucBy optStrucBy) bs) optStrucGoal) with
+elab (name := note) &"note " bs:strucBinder* optStrucGoal:(strucGoal)? opStrucBy:(strucBy)? : tactic => do
+  match (← expandStrucGoal (← expandBinders (← expandStrucBy opStrucBy) bs) optStrucGoal) with
   | some tacSeq => 
     addTrace `note m!"{tacSeq}"
     evalTactic tacSeq
   | none => logWarning "No tacSeq to run"
+
+elab &"show " bs:strucBinder* sg:strucGoal : tactic => do
+  match (← expandStrucGoal (← expandBinders none bs) sg) with
+  | some tacSeq => 
+    addTrace `note m!"{tacSeq}"
+    evalTactic tacSeq
+  | _ => logWarning "Unexpected"
 
 -- TODO optional fix that the squigle line under fix is not the correct length, something about withRef
 elab &"fix " bs:strucBinder* strucGoal:strucGoal : tactic => do
@@ -180,3 +187,9 @@ example : α → β → α := by
 example : α → β → α := by
   fix (ha : α) (_ : β) ⊢ α
   exact ha
+
+example : α → α := by
+  intro ha
+  show (ha : α) ⊢ α
+  exact ha
+  
