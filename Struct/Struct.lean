@@ -77,9 +77,11 @@ def getTacs (ts : TSyntax ``tacticSeq) : TermElabM (Array (TSyntax `tactic)) :=
   | `(tacticSeq| $[$tacs:tactic $[;]?]*) => return tacs
   | _ => throwError "unknown syntax"
 
+-- TODO REMOVE
 def getUniqueIdent : TermElabM (TSyntax `ident) := do
   return mkIdent "tmp0"
 
+-- TODO REMOVE
 def getIdentWithSuggestion (suggestion : name) : TermElabM (TSyntax `ident) := do
   return mkIdent "tmp"
 
@@ -127,6 +129,8 @@ def mkNote (decls : Array LocalDecl := #[]) (optGoal : Option Term := none) (opt
       else
         `(tactic|note $[$binders]*)
 
+
+-- TODO Restructure
 -- def mkCasesMatch
 -- def mkInductionMatch
 
@@ -206,6 +210,7 @@ def structuredCasesOrInduction (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId)
                   let indName := (← getLCtx).getUnusedName (.str ctorName "ih")
                   indArgs := indArgs.push (mkIdent indName)
             
+            -- TODO consider ?_ instead of skip
             let case ← `(inductionAlt| | $ctorIdent $[$ctorArgs]* $[$indArgs]* => skip)
             cases := cases.push case
 
@@ -214,6 +219,7 @@ def structuredCasesOrInduction (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId)
         | _ => addTrace `xx m!"Unexpected state 01"
       
       -- Do stuff with cases, find out mvars inside
+      -- TODO if then else
       match isInduction with
       | true => 
         let matchWithoutNotes ← `(tactic| induction $target:term with $[$cases]*)
@@ -372,6 +378,7 @@ example (n : Nat) : n = n := by
   cases n with
   | zero =>
     show Nat.zero = Nat.zero
+
     sorry
   | succ n_1 =>
     show (n_1 : Nat) ⊢ Nat.succ n_1 = Nat.succ n_1
@@ -383,7 +390,7 @@ example (n : Nat) : n = n := by
 
 example (n : Nat) (h : Even n) : Even (n + n + 2) := by
   structured induction h
-   induction h with
+  induction h with
   | zero =>
     show Even (Nat.zero + Nat.zero + 2)
     sorry
@@ -395,32 +402,6 @@ example (n : Nat) (h : Even n) : Even (n + n + 2) := by
       (a.ih : Even (m + m + 2)) ⊢ Even (n_1 + m + (n_1 + m) + 2)
     sorry
   repeat admit
-  
-  -- Make suggestion
-  -- match h with
-  -- | .zero =>
-
-  --   note ⊢ Even (Nat.zero + Nat.zero + 2)
-  --   sorry
-  -- | .add_two k autoName =>
-  --   note (k : Nat) (autoName : Even k) ⊢ Even (k + 2 + (k + 2) + 2)
-  --   sorry
-  -- | .combine_two k1 hk1 k2 autoName => 
-  --   note (k1 : Nat) (hk1 : Even k1) (k2 : Nat) (autoName : Even k2) ⊢ Even (k1 + k2 + (k1 + k2) + 2)
-  --   sorry
-
-  -- For induction make suggestion
-  -- induction h with
-  -- | zero =>
-  --   note ⊢ Even (Nat.zero + Nat.zero + 2)
-  --   sorry
-  -- | add_two k autoName autoNameIH =>
-  --   -- TODO : Add IH annotation
-  --   note (k : Nat) (autoName : Even k) ⊢ Even (k + 2 + (k + 2) + 2)
-  --   sorry
-  -- | combine_two k1 hk1 k2 autoName autoNameIH1 autoNameIH2 => 
-  --   note (k1 : Nat) (hk1 : Even k1) (k2 : Nat) (autoName : Even k2) ⊢ Even (k1 + k2 + (k1 + k2) + 2)
-  --   sorry  
 
 
   -- OR 
@@ -458,9 +439,12 @@ example (n : Nat) : α ↔ β := by
 
 example (n : Nat) : n = n := by
   structured 
+    -- TODO: Make inaccessible name an underscore in show, omit assertion ?
+    -- TODO TODO
     -- TODO: still weird name _uniq.num
     -- TODO: annotation doesn't change with case suggestion
     cases n
+    have _ : True := sorry
     try apply Even.zero
   repeat admit
 
