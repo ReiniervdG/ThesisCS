@@ -40,7 +40,7 @@ open
 
 -- ##  Extend tactic version of show to support `by`
 macro "show " type:term " by " tacSeq:tacticSeq : tactic => 
-  `(exact show $type by $tacSeq)
+  `(tactic|exact show $type by $tacSeq)
 
 -- ## Introduce assertion helpers
 def assertGoal (goalType : TSyntax `term) : TacticM Unit := withMainContext do
@@ -81,18 +81,18 @@ elab &"assertHyp " hypName:(ident)? " : " hypType:term : tactic =>
 -- ## Define helpers for building tacticSeqs
 def mkTacticSeqAppendTac (tacSeq : TSyntax ``tacticSeq) (tac : TSyntax `tactic) : TermElabM (TSyntax ``tacticSeq) :=
   match tacSeq with
-  | `(tacticSeq| { $[$tacs:tactic $[;]?]* }) =>
+  | `(tacticSeq| { $[$tacs:tactic]* }) =>
     `(tacticSeq| { $[$(tacs.push tac)]* })
-  | `(tacticSeq| $[$tacs:tactic $[;]?]*) =>
+  | `(tacticSeq| $[$tacs:tactic]*) =>
     `(tacticSeq| $[$(tacs.push tac)]*)
   | _ => throwUnsupportedSyntax
 
 def mkTacticSeqAppendTacs (tacSeq : TSyntax ``tacticSeq) (tail : Array (TSyntax `tactic)) : TermElabM (TSyntax ``tacticSeq) :=
   match tacSeq with
-  | `(tacticSeq| { $[$tacs:tactic $[;]?]* }) =>
-    `(tacticSeq| { $[$(tacs)]* $[$(tail)]* })
-  | `(tacticSeq| $[$tacs:tactic $[;]?]*) =>
-    `(tacticSeq| $[$(tacs)]* $[$(tail)]*)
+  | `(tacticSeq| { $[$tacs:tactic]* }) =>
+    `(tacticSeq| { $[$(tacs ++ tail)]*})
+  | `(tacticSeq| $[$tacs:tactic]*) =>
+    `(tacticSeq| $[$(tacs ++ tail)]*)
   | _ => throwUnsupportedSyntax
 
 -- ## Define TSyntax objects for note

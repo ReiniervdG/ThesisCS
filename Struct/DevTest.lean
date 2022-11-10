@@ -1,17 +1,76 @@
--- Setup
 
+
+
+-- Setup
 inductive Even : Nat → Prop
 | zero : Even Nat.zero
-| add_two : ∀ k : Nat, Even k → Even (k+2) 
+| add_two : ∀ k : Nat, Even k → Even (k+2)
+
+inductive Palindrome : List α → Prop
+| nil : Palindrome []
+| single (a : α) : Palindrome [a]
+| sandwich (a : α) (as : List α) (h : Palindrome as) : Palindrome (a::as ++ [a])
+
+def reverse : List α → List α 
+| [] => []
+| a::as => (reverse as) ++ [a]
+
+-- theorem reverseAppend (as : List α) (a : α) : (reverse as) ++ a → reverse (a::as)
+-- | xs x => sorry
+
+example (as : List α): reverse (reverse as) = as := by
+  cases as with
+  | nil => 
+    repeat rw [reverse]
+  | _ => sorry
+
+example : 1 + 0 = 1 := by
+  apply Nat.add_zero
+
+
+example (n : Nat) (h : Even n) : Even (n + 2) := by
+  show Even (n + 2) 
+  . apply Even.add_two _ h
+
+example (n m : Nat) (hm: m = 0) (h : Even (n + m)) : Even (n + m + 2) := by
+  rw [hm] at *
+  simp at h ⊢
+  sorry
+  
+example (n : Nat) : Even n ↔ Even (n + 2) := by
+  apply Iff.intro
+  case mp => intro h ; apply Even.add_two _ h
+  case mpr =>
+    intro h
+    sorry
+
+example {p q : Prop} : (p → q) ↔ (¬q → ¬p) := by  
+  apply Iff.intro
+  all_goals intro _
+  case mp a =>
+    -- note (a : p → q) ⊢ ¬q → ¬p
+
+  case mpr a =>
+    -- note (a : ¬q : ¬p) ⊢ p → q
+
+
+-- example {p q : Prop} : (p → q) ↔ (¬q → ¬p) := by  
+--   apply Iff.intro
+--   all_goals intro h
+--   . intro hnq
+--     rw [Not] at *
+
 
 -- Example of existing structures
-example (hab : α ∧ β) : β ∨ α := by
-  exact Or.intro_right _ hab.left
+-- example (hab : α ∧ β) : β ∨ α := by
+--   exact Or.intro_right _ hab.left
 
-example (ha : α) : α := by
-  show α
-  . skip 
-    exact ha
+-- example (ha : α) : α := by
+--   have this : α := sorry
+--   suffices α ∧ α by
+--     suffices α ∨ α by
+--       sorry
+--     skip
 
 example (hab : α ∧ β) : β ∨ α := by
   have ha : α := by exact hab.left
@@ -24,8 +83,20 @@ example (hab : α ∧ β) : β ∨ α := by
 -- Example of intro, intros
 example : α₁ → α₂ ∧ α₃ → α₄ ∧ α₅ → α₆ ∧ α₇ → α₁ := by
   intro ha1
-  intro (ha23 : α₂ ∧ α₃) ha45 (⟨ (ha6 : α₆), ha7⟩)
+  -- Before
+  intro (ha23 : α₂ ∧ α₃) _ (⟨ (ha6 : α₆), ha7⟩)
+  -- After
+  -- intro (ha23 : α₂ ∧ α₃) _ (⟨ (ha6 : α₆), ha7⟩) ⊢ α₁
   exact ha1
+
+example : α₁ → α₂ ∧ α₃ → α₁ := by
+  -- -- Before
+  -- intro _ _
+  -- -- After
+  -- intro (autoName1 : α₁) (autoName2 : α₂ ∧ α₃) ⊢ α₁ 
+  -- intro h1 ⟨h2, _⟩
+  intro (h1 : α₁) (⟨h2, autoName1⟩ : α₂ ∧ α₃) -- TODO
+
 
 -- Example of multiple goals
 example : α ↔ α := by
@@ -83,6 +154,7 @@ example : α ↔ α := by
 example : α ↔ β := by
   apply Iff.intro
   show α → β
+  repeat sorry
 
 -- CD01 - Changed context example
 example (ha : α) : α ∨ β := by
@@ -140,9 +212,147 @@ example {α : Prop} :  α → β → α := by
 --   intro _
 --   case mp h => sorry
 
-example (n : Nat) : n = n := by
-  induction n with
-  | zero => ?_
-  | succ => ?_
-  sorry
+-- example (n : Nat) : n = n := by
+--   induction n with
+--   | zero => ?_
+--   | succ => ?_
+--   sorry
 
+-- DESIGN EXAMPLES BELOW
+
+-- example (ha : α) : α := by
+--   exact ha
+-- example (ha : α) : α := by
+--   show α by 
+--     exact ha
+
+-- example (ha : α) : α ∨ β := by
+--   apply Or.intro_left _ _
+-- example (ha : α) : α ∨ β := by
+--   suffices α by
+--     apply Or.intro_left _ _
+--     exact this
+  
+-- TODO: if it is unnamed or untyped, still throw it through suggestions with $rhs same
+-- example (hab : α ∧ β) : α := by
+--   have := hab.left
+-- example (hab : α ∧ β) : α := by
+--   have ha : α := hab.left
+
+-- example (hab : α ∧ β) : β ∧ α := by
+--   have ha : α := hab.left
+--   apply And.intro _ ha
+-- example (ha : α) : α ∧ β ∧ α := by
+--   note (ha : α) ⊢ β by 
+--     have ha : α := hab.left
+--     apply And.intro _ ha
+  
+example : α ↔ α := by
+  apply Iff.intro
+  -- State:
+  -- Case mp {α : Prop ⊢ α → α}
+  -- Case mpr {α : Prop ⊢ α → α}
+  repeat intro ha ; exact ha
+example : α ↔ α := by
+  apply Iff.intro
+  case mp =>
+    intro ha ; exact ha
+  case mpr =>
+    intro ha ; exact ha
+
+example : α ↔ α := by
+  apply Iff.intro
+  all_goals intro ha
+  -- State:
+  -- Case mp {α : Prop, ha : α ⊢ α → α}
+  -- Case mpr {α : Prop, ha : α ⊢ α → α}
+  repeat exact ha
+example : α ↔ α := by
+  apply Iff.intro
+  all_goals intro _
+  case mp ha =>
+    exact ha
+  case mpr ha =>
+    exact ha
+
+-- example : α ↔ α := by
+--   apply Iff.intro
+--   all_goals intro _
+--   case mp ha =>
+--     show (ha : α) ⊢ α
+--     exact ha
+--   case mpr ha =>
+--     show (ha : α) ⊢ α
+--     exact ha
+
+-- TODO: These cases don't have tags, then use underscore?
+example : Even 6 ∧ Even 4 := by
+  apply And.intro _ _
+  all_goals repeat apply Even.add_two _ _
+
+  case _ => sorry
+  case _ => sorry
+
+
+-- INTROS EXAMPLES
+-- Singles
+example : α → α := by
+  -- Adding inaccessible hypothesis
+  intro
+  intro _
+  intros
+  -- Adding named hypothesis
+  intro ha
+  intros ha
+
+-- Multiple
+example : α → β → α := by
+  -- Adding inaccssible hypotheses
+  intro _ _
+  intros
+  -- Adding named hypotheses
+  intro ha hb
+  intros ha hb
+
+-- Pattern matching
+example : α → α ∧ β → α := by
+  intro (ha : α) (⟨ (ha : α ), (hb : β) ⟩)
+
+-- TODO: Determine whether an intros statement contains inaccssible decls, warn user, leave out annotation ?
+
+-- CASES EXAMPLES
+-- Natural example: reverse of palindrome is itself a palindrome
+example (as : List α) (h : Palindrome as) : Palindrome (reverse as) := by
+  cases h with
+  | nil => 
+    simp [reverse]
+    exact Palindrome.nil
+  | single a => 
+    simp [reverse]
+    exact Palindrome.single _
+  | sandwich a as has => 
+    simp [reverse]
+    sorry
+    
+
+-- Intro code examples
+example (n m : Nat) : Even n ∧ Even m → Even 0 → Even (n + m) := by 
+  -- intro
+  -- intro _ 
+  -- intro hnm
+  -- intros _
+  -- intro hnm _
+  -- intros
+  -- intros hm _
+  -- intro ⟨hn, _⟩ _
+
+  -- intro (a : Even n ∧ Even m)
+  -- intro (a : Even n ∧ Even m)
+  -- intro (hnm : Even n ∧ Even m)
+  -- intro (a : Even n ∧ Even m)
+  -- intro (hnm : even n ∧ Even m) (a : Even 0)
+  -- intro (a : Even n ∧ Even m) (a.1 : Even 0)
+  -- intro (hm : Even n ∧ Even m) (a : Even 0)
+  -- intro (⟨hn, _ ⟩ : Even n ∧ Even m) (a : Even 0)
+
+  sorry

@@ -345,11 +345,12 @@ def elabCasesTargets (targets : Array Syntax) : TacticM (Array Expr) :=
       return args.map (·.expr)
 
 -- # End of duplicate code
-
+@[deprecated]
 def appendMVars (old : Array MVarId) (new : Array MVarId) : TacticM (Array MVarId) := 
   return old ++ new
 
 -- Resembles `evalAlts` in Core Lean
+@[deprecated]
 def getMVarsFromAlts (elimInfo : ElimInfo) (alts : Array (Name × MVarId)) (optPreTac : Syntax) (altsSyntax : Array Syntax)
     (initialInfo : Info)
     (numEqs : Nat := 0) (numGeneralized : Nat := 0) (toClear : Array FVarId := #[]) : TacticM (Array MVarId) := do
@@ -450,6 +451,7 @@ where
       evalTacticAt optPreTac[0] mvarId
 
 -- Resembles `evalCases` in Core Lean
+@[deprecated]
 def getMVarsFromCaseMatch (stx : Syntax) : TacticM (Array MVarId) :=
   match expandCases? stx with
   | some stxNew => do
@@ -484,6 +486,7 @@ def getMVarsFromCaseMatch (stx : Syntax) : TacticM (Array MVarId) :=
 
 -- Resembles `evalInduction` in Core Lean
 -- def 
+@[deprecated]
 def getMVarsFromInductionMatch (stx : Syntax) : TacticM (Array MVarId) := 
   match expandInduction? stx with
   | some stxNew => do
@@ -532,12 +535,14 @@ structure StateDiff where
   changedDecls : Array LocalDecl
   removedDecls : Array LocalDecl
 
+@[deprecated]
 def StateDiff.toMessageData (s : StateDiff) : MessageData :=
   m!"isGoalChanged: {if s.newlyChangedGoal == none then "false" else "true"}, 
       newDecls: [{s.newDecls.map fun ldecl => ldecl.type}], 
       changedDecls: [{s.changedDecls.map fun ldecl => ldecl.type}],
       removedDecls: [ {s.removedDecls.map fun ldecl => ldecl.type} ]"
 
+@[deprecated]
 def goalsToStateDiff (oldGoal : MVarId) (newGoal : MVarId) : TacticM StateDiff := do
   let oldGoalType ← instantiateMVars (← oldGoal.getDecl).type
   let newGoalType ← instantiateMVars (← newGoal.getDecl).type
@@ -593,6 +598,7 @@ def mapMVarToNote (oldGoal : MVarId) (newGoal : MVarId) : TacticM (TSyntax `tact
         let binders ← decls.mapM (fun decl => declToBinder decl)
         `(tactic|show $[$binders]* ⊢ $t)
 
+@[deprecated]
 def getMVarsFromMatch (oldGoal : MVarId) (matchTactic : TSyntax `tactic) (isInduction : Bool) : TacticM (Array (TSyntax `tactic)) := do
   oldGoal.withContext do
     withoutModifyingState do 
@@ -603,5 +609,14 @@ def getMVarsFromMatch (oldGoal : MVarId) (matchTactic : TSyntax `tactic) (isIndu
       | false =>  
         let mvars ← getMVarsFromCaseMatch matchTactic.raw
         mvars.mapM (fun mvar => do mapMVarToNote oldGoal mvar)
+
+-- Attempt to get rid of duplicating native cases and induction code
+def getNotesFromMatch (oldGoal : MVarId) (matchTactic : TSyntax `tactic) : TacticM (List (TSyntax `tactic)) := do
+  oldGoal.withContext do
+    withoutModifyingState do 
+      evalTactic matchTactic
+      -- TODO: consider the order of these goals
+      let mvars ← getUnsolvedGoals
+      mvars.mapM (fun mvar => do mapMVarToNote oldGoal mvar)
 
 end InductionHelper
