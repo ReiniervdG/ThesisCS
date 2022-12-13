@@ -135,7 +135,6 @@ def mkTypeFromTac (rhs : TSyntax `tactic) : TacticM (TSyntax `term) :=
 def mapMVarToNote (oldGoal : MVarId) (newGoal : MVarId) : TacticM (TSyntax `tactic) := do
   newGoal.withContext do
     let s ← goalsToStateDiff oldGoal newGoal
-    addTrace `test m!"{s.toMessageData}"
     mkSuggestion (s.changedDecls ++ s.newDecls) s.newlyChangedGoal none
 
 def getNotesFromTac (oldGoal : MVarId) (tac : TSyntax `tactic) : TacticM (List (TSyntax `tactic)) := do
@@ -219,78 +218,73 @@ def structuredIntros (target : Expr) (terms : TSyntaxArray `term) : TacticM Unit
     let suggestion ← `(tactic|intro $[$binders]*)
     addTrace `test m!"Try this: {suggestion}"
 
--- TODO : Refactor out stuff
-def structuredCasesOrInduction (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (target : TSyntax `term) (isInduction : Bool) : TacticM Unit :=
-  oldGoal.withContext do
-    let mut cases : Array (TSyntax ``inductionAlt) := #[]
+-- Sub function for `structuredCasesOrInduction`
+def mkInductionAlt (fnName : Name) (ctor : Name) (isInduction : Bool) : TacticM (TSyntax ``inductionAlt) := do
+  let env ← getEnv
+  let ctorInfo := env.find? ctor
+  match ctor with
+  | .str _ s => 
+    let ctorIdent := mkIdent s
 
-    let env ← getEnv
+    match ctorInfo with
+    | some (.ctorInfo cval) =>
+      let decls ← forallTelescopeReducing cval.type fun args _ => 
+        args.mapM (fun arg => arg.fvarId!.getDecl)
 
-    let targetExpr ← elabTerm target none
-    let targetType ← inferType targetExpr
-    let fnExpr := targetType.getAppFn
-    
-    match fnExpr with
-    | .const fnName _ =>
+      let mut ctorArgs : Array Ident := #[]
+      let mut indArgs : Array Ident := #[]
 
-      let ival ← getInductiveValFromMajor targetExpr
+      for decl in decls do
+        if decl.userName.hasMacroScopes then
+          let baseName := if ← isProp decl.type then "h" else "a"
+          let ctorName := (← getLCtx).getUnusedName (.str .anonymous baseName)
+          ctorArgs := ctorArgs.push (mkIdent ctorName)
 
-      -- Separate foreach to map function
-      for ctor in ival.ctors do
-        let ctorInfo := env.find? ctor
+          if isInduction ∧ decl.type.isAppOf fnName then
+            let indName := (← getLCtx).getUnusedName (.str ctorName "ih")
+            indArgs := indArgs.push (mkIdent indName)
+        else
+          let ctorName := (← getLCtx).getUnusedName decl.userName
+          ctorArgs := ctorArgs.push (mkIdent ctorName)
 
-        match ctor with
-        | .str _ s => 
-          let ctorIdent := mkIdent s
-
-          match ctorInfo with
-          | some (.ctorInfo cval) =>
-            let decls ← forallTelescopeReducing cval.type fun args _ => 
-              args.mapM (fun arg => arg.fvarId!.getDecl)
-
-            let mut ctorArgs : Array Ident := #[]
-            let mut indArgs : Array Ident := #[]
-
-            for decl in decls do
-              if decl.userName.hasMacroScopes then
-                let baseName := if ← isProp decl.type then "h" else "a"
-                let ctorName := (← getLCtx).getUnusedName (.str .anonymous baseName)
-                ctorArgs := ctorArgs.push (mkIdent ctorName)
-
-                if isInduction ∧ decl.type.isAppOf fnName then
-                  let indName := (← getLCtx).getUnusedName (.str ctorName "ih")
-                  indArgs := indArgs.push (mkIdent indName)
-              else
-                let ctorName := (← getLCtx).getUnusedName decl.userName
-                ctorArgs := ctorArgs.push (mkIdent ctorName)
-
-                if isInduction ∧ decl.type.isAppOf fnName then
-                  let indName := (← getLCtx).getUnusedName (.str ctorName "ih")
-                  indArgs := indArgs.push (mkIdent indName)
-            
-            let case ← `(inductionAlt| | $ctorIdent $[$ctorArgs]* $[$indArgs]* => ?_)
-            cases := cases.push case
-
-          | _ => addTrace `xx m!"Unexpected state 02"
-          
-        | _ => addTrace `xx m!"Unexpected state 01"
+          if isInduction ∧ decl.type.isAppOf fnName then
+            let indName := (← getLCtx).getUnusedName (.str ctorName "ih")
+            indArgs := indArgs.push (mkIdent indName)
       
-      if isInduction then
-        let matchWithoutNotes ← `(tactic| induction $target:term with $[$cases]*)
-        let notes ← getNotesFromTac oldGoal matchWithoutNotes
-        let casesWithNotes ← cases.zip notes.toArray |>.mapM (fun (case, note) => do replaceHoleWithNoteInductionAlt case note)
-        let matchWithNotes ← `(tactic| induction $target:term with $[$casesWithNotes]*)
-        addTrace `test m!"Try this: {matchWithNotes}"
-      else
-        let matchWithoutNotes ← `(tactic| cases $target:term with $[$cases]*)
-        let notes ← getNotesFromTac oldGoal matchWithoutNotes
-        let casesWithNotes ← cases.zip notes.toArray |>.mapM (fun (case, note) => do replaceHoleWithNoteInductionAlt case note)
-        let matchWithNotes ← `(tactic| cases $target:term with $[$casesWithNotes]*)
-        addTrace `test m!"Try this: {matchWithNotes}"
-    | _ => addTrace `xx m!"Unexpected state 00"
+      let case ← `(inductionAlt| | $ctorIdent $[$ctorArgs]* $[$indArgs]* => ?_)
+      return case
+
+    | _ => unreachable!
+  | _ => unreachable!
+
+-- When matched on `induction` or `cases`
+def structuredCasesOrInduction (oldGoal : MVarId) (target : TSyntax `term) (isInduction : Bool) : TacticM Unit := do
+  let targetExpr ← elabTerm target none
+  let targetType ← inferType targetExpr
+  let fnExpr := targetType.getAppFn
+  
+  match fnExpr with
+  | .const fnName _ =>
+    let ival ← getInductiveValFromMajor targetExpr
+
+    let cases := (← ival.ctors.mapM fun ctor => mkInductionAlt fnName ctor isInduction).toArray
+    
+    if isInduction then
+      let matchWithoutNotes ← `(tactic| induction $target:term with $[$cases]*)
+      let notes ← getNotesFromTac oldGoal matchWithoutNotes
+      let casesWithNotes ← cases.zip notes.toArray |>.mapM (fun (case, note) => do replaceHoleWithNoteInductionAlt case note)
+      let matchWithNotes ← `(tactic| induction $target:term with $[$casesWithNotes]*)
+      addTrace `test m!"Try this: {matchWithNotes}"
+    else
+      let matchWithoutNotes ← `(tactic| cases $target:term with $[$cases]*)
+      let notes ← getNotesFromTac oldGoal matchWithoutNotes
+      let casesWithNotes ← cases.zip notes.toArray |>.mapM (fun (case, note) => do replaceHoleWithNoteInductionAlt case note)
+      let matchWithNotes ← `(tactic| cases $target:term with $[$casesWithNotes]*)
+      addTrace `test m!"Try this: {matchWithNotes}"
+  | _ => addTrace `xx m!"Unexpected state 00"
 
 -- Sub function for `structuredCasesDefault`
-def mkSingleCase (oldGoal : MVarId) (newGoal : MVarId) : TacticM (TSyntax `tactic) := do
+def mkDefaultCase (oldGoal : MVarId) (newGoal : MVarId) : TacticM (TSyntax `tactic) := do
   -- withoutModifyingState because we rename local declaarations to 
   withoutModifyingState do
     -- Minor todo: sometimes tag is empty, what to do then? I've seen it before, but cannot reproduce anymore
@@ -318,16 +312,17 @@ def mkSingleCase (oldGoal : MVarId) (newGoal : MVarId) : TacticM (TSyntax `tacti
         match lctx.find? newDeclFVar with
         | some ldecl => return some ldecl
         | none => unreachable!
-        
+
     let noteSuggestion ← mkSuggestion (newDecls ++ s.changedDecls) s.newlyChangedGoal none
     `(tactic|case $caseTag $[$caseArgs]* => $noteSuggestion:tactic)
 
--- structuredCasesDefault: When multiple post-goals, but no match on cases or induction
+-- When multiple post-goals, but no match on cases or induction
 def structuredCasesDefault (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (newGoals : List MVarId) : TacticM Unit := do
-  let cases ← newGoals.mapM fun newGoal => mkSingleCase oldGoal newGoal
+  let cases ← newGoals.mapM fun newGoal => mkDefaultCase oldGoal newGoal
   let suggestion ← mkTacticSeqAppendTacs tacSeq cases.toArray
   addTrace `structured m!"Try this: {suggestion}"
 
+-- When no syntax is matched with a single post-goal
 def structuredDefault (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) : TacticM Unit := do
   evalTactic tacSeq
   match (← getUnsolvedGoals) with
@@ -447,9 +442,9 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
               structuredIntros goalType termIds
 
       | `(tactic|cases $target:term) 
-        => structuredCasesOrInduction tacSeq goal target false
+        => structuredCasesOrInduction goal target false
       | `(tactic|induction $target:term)
-        => structuredCasesOrInduction tacSeq goal target true
+        => structuredCasesOrInduction goal target true
       | _ => structuredDefault tacSeq goal
     | _ => structuredDefault tacSeq goal
   | _ =>
@@ -507,8 +502,20 @@ example : α ↔ α := by
   structured
     apply Iff.intro
     intro _
+  repeat admit
   -- apply Iff.intro
   -- intro _
   -- case mp h => 
   --   s_show (h : α) ⊢ α
   -- case mpr => show α → α
+
+example (n : Nat) : n = n := by
+  structured cases n
+  -- cases n with
+  -- | zero => 
+  --   show Nat.zero = Nat.zero
+  --   admit
+  -- | succ n_1 => 
+  --   s_show (n_1 : Nat) ⊢ Nat.succ n_1 = Nat.succ n_1 
+  --   admit
+  admit
