@@ -1,4 +1,4 @@
-
+import Lean
 
 
 -- Setup
@@ -6,14 +6,25 @@ inductive Even : Nat → Prop
 | zero : Even Nat.zero
 | add_two : ∀ k : Nat, Even k → Even (k+2)
 
-inductive Palindrome : List α → Prop
+inductive Palindrome : List Nat → Prop
 | nil : Palindrome []
-| single (a : α) : Palindrome [a]
-| sandwich (a : α) (as : List α) (h : Palindrome as) : Palindrome (a::as ++ [a])
+| single (a : Nat) : Palindrome [a]
+| sandwich (a : Nat) (as : List Nat) (h : Palindrome as) : Palindrome ([a] ++ as ++ [a])
+
+inductive Sorted : List Nat → Prop
+| nil : Sorted []
+-- TODO
+
+-- Idea: 
+
+-- def Range : Nat → Nat → List Nat
+-- | n m => [0] ++ (Range 1 n)
 
 def reverse : List α → List α 
 | [] => []
 | a::as => (reverse as) ++ [a]
+
+theorem reverseAppend (a : α) (as : List α) : reverse (as ++ [a]) = [a] ++ as := sorry 
 
 -- theorem reverseAppend (as : List α) (a : α) : (reverse as) ++ a → reverse (a::as)
 -- | xs x => sorry
@@ -321,19 +332,77 @@ example : α → α ∧ β → α := by
 -- TODO: Determine whether an intros statement contains inaccssible decls, warn user, leave out annotation ?
 
 -- CASES EXAMPLES
+
+example {n m : Nat} (hn : Even n) (hm : Even m) : Even (n + m) := by
+  induction n with
+  | zero => 
+    simp
+    assumption
+  | succ n_1 => sorry -- doesn't work since we need two here
+
 -- Natural example: reverse of palindrome is itself a palindrome
-example (as : List α) (h : Palindrome as) : Palindrome (reverse as) := by
-  cases h with
+example (as : List Nat) (has : Palindrome as) : Palindrome (reverse as) := by
+  cases has
+  apply Palindrome.nil
+  apply Palindrome.single
+  simp [reverse, reverseAppend]
+  apply Palindrome.sandwich
+  assumption
+example (as : List Nat) (has : Palindrome as) : Palindrome (reverse as) := by
+  cases has with
   | nil => 
-    simp [reverse]
+    -- show ⊢ Palindrome (reverse [])
     exact Palindrome.nil
   | single a => 
-    simp [reverse]
-    exact Palindrome.single _
-  | sandwich a as has => 
-    simp [reverse]
+    -- show (a : Nat) ⊢ Palindrome (reverse [a])
+    exact Palindrome.single a
+  | sandwich a as h =>  
+    -- show (a : Nat) (as : List Nat) (h : Palindrome as) ⊢ Palindrome (reverse (a :: as ++ [a]))
+    simp [reverse, reverseAppend]
+    exact Palindrome.sandwich a as h
+
+def double_succ {n : Nat} : Nat.succ n * 2 = (n * 2) + 2 := by 
+  induction n with
+  | zero => simp
+  | succ n_1 n_1.ih => 
+    simp
+    rw [n_1.ih]
     sorry
-    
+example {n : Nat} : Even (n * 2) := by
+  induction n with
+  | zero => simp ; exact Even.zero
+  | succ n_1 n_1.ih => 
+    simp [double_succ]
+    apply Even.add_two
+    apply n_1.ih
+
+example {p : Bool} : p ∨ ¬ p := by
+  cases p with
+  | false => simp
+  | true => simp
+
+example {n : Nat} : Even n ∨ Even (.succ n) := by
+  induction n
+  apply Or.intro_left
+  apply Even.zero
+  case succ n_1 n_1.ih =>
+    cases n_1.ih
+    apply Or.intro_right
+    apply Even.add_two
+    assumption
+    apply Or.intro_left
+    assumption
+
+example {n : Nat} : Even n ∨ Even (.succ n) := by
+  induction n with
+  | zero => 
+    exact Or.intro_left _ Even.zero
+  | succ n_1 n_1.ih =>
+    cases n_1.ih with
+    | inl lhs => 
+      exact Or.intro_right _ (Even.add_two _ lhs)
+    | inr rhs => 
+      exact Or.intro_left _ rhs
 
 -- Intro code examples
 example (n m : Nat) : Even n ∧ Even m → Even 0 → Even (n + m) := by 
@@ -356,3 +425,119 @@ example (n m : Nat) : Even n ∧ Even m → Even 0 → Even (n + m) := by
   -- intro (⟨hn, _ ⟩ : Even n ∧ Even m) (a : Even 0)
 
   sorry
+
+namespace Jannis
+
+inductive Palindrome : List Nat → Prop
+| nil : Palindrome []
+| single (n : Nat) : Palindrome [n]
+| sandwich (n : Nat) (ns : List Nat) : Palindrome ns → Palindrome ([n] ++ ns ++ [n])
+
+example (ns : List Nat) (hns : Palindrome ns) : Palindrome (ns.reverse) := by
+  induction hns
+  apply Palindrome.nil
+  apply Palindrome.single
+  simp [List.reverse_append, List.reverse_cons]
+  apply Palindrome.sandwich
+  assumption
+
+example (ns : List Nat) (hns : Palindrome ns) : Palindrome (ns.reverse) := by
+  induction hns with
+  | nil => 
+    -- show ⊢ Palindrome (reverse [])
+    apply Palindrome.nil
+  | single n => 
+    -- show (n : Nat) ⊢ Palindrome (reverse [n])
+    apply Palindrome.single
+  | sandwich n ns_1 a ns_1.ih =>  
+    -- show (n : Nat) (ns_1 : List Nat) (a : Palindrome ns) (ns_1.ih : Palindrome (List.reverse ns_1)) ⊢ Palindrome (List.reverse ([n] ++ ns_1 ++ [n]))
+    simp [List.reverse_append, List.reverse_cons]
+    apply Palindrome.sandwich
+    assumption
+
+
+end Jannis
+
+
+
+-- prove Even 4
+-- suffices Even 0 by ..
+-- show Even 0 by ..
+
+
+-- example : Even 4 ∧ Even 0 := by
+--   apply And.intro
+--   repeat apply Even.add_two _ _
+--   exact Even.zero
+--   exact Even.zero
+
+--   cases _ with
+--   | _ => 
+--     show _ ⊢ _
+--     have :=
+--     have :=
+--     suffices 
+--     suffices
+--     note () ⊢ _
+--     -- Get rid of this
+--     show .. apply Even.zero
+  
+example : Even 4 := by
+  have e2 : Even 2 := Even.add_two _ Even.zero
+  suffices Even 2 by
+    apply Even.add_two _ _
+    exact this
+  assumption
+
+
+example (n m : Nat) (h : Even (n + m)) : m = 0 → Even n := by
+  intro hm
+  rw [hm] at h
+  simp at *
+  assumption
+example (n m : Nat) (h : Even (n + m)) : m = 0 → Even n := by
+  intro (hm : m = 0)
+  have (h : Even (n + 0)) := by 
+    rw [hm] at h
+    admit
+
+  have x := Even.zero
+  have x := Even.add_two _ x
+
+
+  have (h : Even 0) := by 
+    simp at *
+    admit
+  assumption
+
+
+open 
+  Lean 
+  Lean.Expr
+  Lean.Meta 
+  Lean.Elab 
+  Lean.Elab.Tactic
+  Lean.PrettyPrinter 
+  Lean.Parser 
+  Lean.Parser.Tactic
+
+def test (t : TSyntax `term): TacticM Unit := do
+  addTrace `xx m!"{repr t.raw}"
+  let x ← elabTerm t none
+  addTrace `xx m!"{repr x}"
+  pure ()
+
+elab &"test " t:term : tactic =>
+  test t
+
+example : False := by
+  test 1 + 2
+  -- Syntax: Lean.Syntax.node `term_+_ [
+  --  Lean.Syntax.node `num [Lean.Syntax.atom "1"]
+  --  "+"
+  --  Lean.Syntax.node `num [Lean.Syntax.atom "2"]
+  -- ]
+
+  -- Expr: Lean.Expr.app [...]
+  admit
+  

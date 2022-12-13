@@ -10,37 +10,11 @@ open
   Lean.Parser.Tactic
 
 /- 
+  # TODO: redo description
   # Description of the purpose of this file 
 
-  Extends the tactic version of `show` to also allow `show .. by ..` statements like proof term mode supports
-
-  Introduces functionality to assert hypotheses, e.g.
-  `by assert_hyp h : α` Checks named hypothesis `h` of type `α`
-  `by assert_hyp : α ` Checks any hypothesis of type `α`
-  `by assert_goal α` Checks goal is of type `α`
-
-  Defines `TSyntax` objects for the elements of the `fix` and `note` tactic
-  Defines mapping of those `TSyntax` objects to relevant tactics
-  Defines expansion functions to unpack any `fix` and `note` tactic with optional arguments
-
-  Elaborates the `note` tactic;
-  `note (ha : α) (_ : β)` -> `assert_hyp ha : α; assert_hyp : β`
-  `note ⊢ α` -> `assert_goal α`
-  
-  `note (ha : α) (_ : β) ⊢ α` -> `assert_hyp ha : α; assert_hyp : β; assert_goal α`
-  `note (ha : α) (_ : β) by intros ha _` -> `intros ha _; assert_hyp ha : α; assert_hyp hb: β`  
-
-  `note (ha : α) (_ : β) ⊢ α by intros ha _` -> `intros ha _; assert_hyp ha : α; assert_hyp hb: β; assert_goal α`
-
-  Simple Elaboration of `fix` to `note` tactic
-  `fix (ha : α) (_ : β) ⊢ α` -> `note (ha : α) (_ : β) ⊢ α by intros ha _`
-
-  Finally some examples of `fix` and `note` tactics
+  ## ..
 -/
-
--- ##  Extend tactic version of show to support `by`
-macro "show " type:term " by " tacSeq:tacticSeq : tactic => 
-  `(tactic|exact show $type by $tacSeq)
 
 -- ## Introduce assertion helpers
 def assertGoal (goalType : TSyntax `term) : TacticM Unit := withMainContext do
@@ -54,7 +28,7 @@ def assertGoal (goalType : TSyntax `term) : TacticM Unit := withMainContext do
 elab &"assertGoal " t:term : tactic =>
   assertGoal t
 
--- TODO: If we check a named hyp, but the name does not exist in ctx, but an unnamed hyp of that type exists, rename it
+-- assertHyp also allows an unnamed assertion with a (_ : type) binder, but is not used in suggestions anymore
 def assertHyp (hypName : Option (TSyntax `ident) := none) (hypType : TSyntax `term) : TacticM Unit := withMainContext do
   let hypExpr ← elabTerm hypType none
   let mainGoal ← getMainGoal
@@ -96,10 +70,10 @@ def mkTacticSeqAppendTacs (tacSeq : TSyntax ``tacticSeq) (tail : Array (TSyntax 
   | _ => throwUnsupportedSyntax
 
 -- ## Define TSyntax objects for note
--- TODO: Optionally reuse the Lean.Tactics `binderIdent` syntax
 syntax strucBinder := " (" ((ident <|> hole)) " : " term ") "
-syntax strucGoal := " ⊢ " term
 syntax strucBy := " by " tacticSeq
+
+syntax strucBinders := (strucBinder+ " ⊢ ")
 
 /- ## Map TSyntax to useful TSyntax -/
 def strucBinderToAssertTactic : TSyntax ``strucBinder → TermElabM (TSyntax `tactic)
@@ -107,89 +81,39 @@ def strucBinderToAssertTactic : TSyntax ``strucBinder → TermElabM (TSyntax `ta
   | `(strucBinder| (_ : $u:term)) => `(tactic|assertHyp : $u)
   | _ => throwUnsupportedSyntax
 
-def strucGoalToAssertGoal : TSyntax ``strucGoal → TermElabM (TSyntax `tactic)
-  | `(strucGoal| ⊢ $t:term) => `(tactic|assertGoal $t)
-  | _ => throwUnsupportedSyntax
-
 def strucByToTacSeq : TSyntax ``strucBy → TermElabM (TSyntax ``tacticSeq)
   | `(strucBy| by $tacSeq:tacticSeq) => `(tacticSeq|$tacSeq)
   | _ => throwUnsupportedSyntax
 
-def strucBinderToId (b : TSyntax `strucBinder) : TermElabM (TSyntax [`ident, `Lean.Parser.Term.hole]) := do
-  match b with
-  | `(strucBinder| ($i:ident : $u:term)) => return i
-  | `(strucBinder| ($h:hole : $u:term)) => return h
-  | _ => throwUnsupportedSyntax
-
--- ## Map from state to necessary TSyntax objects
 def declToBinder (decl : LocalDecl) : TermElabM (TSyntax `strucBinder) := do
   if decl.userName.hasMacroScopes then
     return (← `(strucBinder|(_ : $(← delab (← instantiateMVars decl.type)))))
   else 
     return (← `(strucBinder|($(mkIdent decl.userName) : $(← delab (← instantiateMVars decl.type)))))
 
--- ## Expand optional syntax structures to optional tacticSeq
-def expandStrucBy (osb : Option (TSyntax `strucBy)) : TermElabM (Option (TSyntax ``tacticSeq)) := do
-  match osb with
-  | some sb => 
-    return (← strucByToTacSeq sb)
-  | none => 
-    return none
+-- # Main custom tactics
 
-def expandBinders (lhs : Option (TSyntax ``tacticSeq)) (bs : Array (TSyntax `strucBinder)) : TermElabM (Option (TSyntax ``tacticSeq)) := do
-  let mut tacs : Array (TSyntax `tactic) := #[]
-  for binder in bs do
-    tacs := tacs.push (← strucBinderToAssertTactic binder)
-  match lhs with
-  | some tacSeq => return (← mkTacticSeqAppendTacs tacSeq tacs)
-  | none => 
-    -- Match to ensure we return none if it's empty
-    match tacs with
-    | #[] => return none
-    | nonzeroTacs => return some (← `(tacticSeq| $[$(nonzeroTacs)]*))
+elab &"s_suffices " obs:(strucBinders)? g:term sb:strucBy : tactic => do
+  evalTactic (← strucByToTacSeq sb)
+  if let some bs := obs then
+    match bs with
+    | `(strucBinders| $bs:strucBinder* ⊢) =>
+      for b in bs do
+        evalTactic (← strucBinderToAssertTactic b)
+    | _ => throwUnsupportedSyntax
+  evalTactic (← `(tactic|assertGoal $g))
 
-def expandStrucGoal (lhs : Option (TSyntax ``tacticSeq)) (osg : Option (TSyntax `strucGoal)) : TermElabM (Option (TSyntax ``tacticSeq)) := do
-  match osg with
-  | some sg =>
-    match lhs with
-    | some tacSeq => return (← mkTacticSeqAppendTac tacSeq (← strucGoalToAssertGoal sg))
-    | none => 
-      return some (← `(tacticSeq|$(← strucGoalToAssertGoal sg):tactic))
-  | none =>
-    return lhs 
+elab &"s_have" bs:strucBinder* osb:(strucBy)? : tactic => do
+  if let some sb := osb then
+    evalTactic (← strucByToTacSeq sb)
+  for b in bs do
+    evalTactic (← strucBinderToAssertTactic b)
 
-elab (name := note) &"note " bs:strucBinder* optStrucGoal:(strucGoal)? opStrucBy:(strucBy)? : tactic => do
-  match (← expandStrucGoal (← expandBinders (← expandStrucBy opStrucBy) bs) optStrucGoal) with
-  | some tacSeq => 
-    addTrace `note m!"{tacSeq}"
-    evalTactic tacSeq
-  | none => logWarning "No tacSeq to run"
-
-elab &"show " bs:strucBinder* sg:strucGoal : tactic => do
-  match (← expandStrucGoal (← expandBinders none bs) sg) with
-  | some tacSeq => 
-    addTrace `note m!"{tacSeq}"
-    evalTactic tacSeq
-  | _ => logWarning "Unexpected"
-
--- TODO optional fix that the squigle line under fix is not the correct length, something about withRef
-elab &"fix " bs:strucBinder* strucGoal:strucGoal : tactic => do
-  let ids ← bs.mapM (fun b => strucBinderToId b)
-  evalTactic (← `(tactic|note $bs:strucBinder* $strucGoal:strucGoal by intros $[$ids]*))
-
-
-example : α → β → α := by
-  intros ha _
-  exact ha
-example : α → β → α := by
-  note (ha : α) (_ : β) ⊢ α by intros ha _
-  exact ha
-example : α → β → α := by
-  fix (ha : α) (_ : β) ⊢ α
-  exact ha
-
-example : α → α := by
-  intro ha
-  show (ha : α) ⊢ α
-  exact ha
-  
+elab &"s_show" obs:(strucBinders)? g:term : tactic => do
+  if let some bs := obs then
+    match bs with
+    | `(strucBinders| $bs:strucBinder* ⊢) =>
+      for b in bs do
+        evalTactic (← strucBinderToAssertTactic b)
+    | _ => throwUnsupportedSyntax
+  evalTactic (← `(tactic|assertGoal $g))
