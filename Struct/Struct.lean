@@ -62,6 +62,34 @@ def mkSuggestion (decls : Array LocalDecl := #[]) (optGoal : Option Term := none
       else
         `(tactic|s_have $[$binders]*)
 
+def mkSuggestionFromFVars (fvars : Array FVarId := #[]) (optGoal : Option Term := none) (optTacSeq : Option (TSyntax ``tacticSeq)) : TacticM (TSyntax `tactic) := do
+  let binders ← fvars.mapM (fun fvar => do declToBinder (← fvar.getDecl))  
+  match optGoal with
+  | some goal => 
+    match optTacSeq with
+    | some tacSeq => 
+      if binders.size == 0 then
+        `(tactic|s_suffices $goal:term by $tacSeq)    
+      else
+        `(tactic|s_suffices $[$binders]* ⊢ $goal by $tacSeq)
+    | none => 
+      if binders.size == 0 then
+        `(tactic|show $goal)
+      else
+        `(tactic|s_show $[$binders]* ⊢ $goal)
+  | none => 
+    match optTacSeq with
+    | some tacSeq => 
+      if binders.size == 0 then
+        throwError "No change of state detected, unreachable state, this should be caught by goal comparison match"
+      else
+        `(tactic|s_have $[$binders]* by $tacSeq)
+    | none => 
+      if binders.size == 0 then
+        throwError "No change of state detected, unreachable state, this should be caught by goal comparison match"
+      else
+        `(tactic|s_have $[$binders]*)
+
 
 -- ## Segment description
 structure StateDiff where
@@ -166,14 +194,6 @@ def replaceHoleWithNoteInductionAlt (old : TSyntax ``inductionAlt) (note : TSynt
   | _ => 
     throwUnsupportedSyntax
 
-def replaceHoleWithNoteCaseTactic (old : TSyntax `tactic) (note : TSyntax `tactic) : TermElabM (TSyntax `tactic) := do
-  match old with
-  | `(tactic|case $tag $[$ids]* => skip) => 
-      `(tactic|case $tag $[$ids]* => 
-        $note:tactic)
-  | _ => 
-    throwUnsupportedSyntax
-
 -- Function that turns a specific TSyntax to a more generic TSyntax
 def mapBinderIdentToTerm (id : TSyntax ([`ident, `Lean.Parser.Term.hole])): TacticM (TSyntax `term) := do 
   match id with 
@@ -199,7 +219,6 @@ def structuredIntros (target : Expr) (terms : TSyntaxArray `term) : TacticM Unit
           binders := binders.push (← `(term| ($(mkIdent autoName) : $type)))
           addTrace `xx m!"From underscore to ({autoName} : {type})"
         | `( $id:ident ) =>
-          -- TODO verify id available
           binders := binders.push (← `(term| ($id : $type)))
           addTrace `xx m!"From only ident to ({id} : {type})"
         | `( ( _ : $t:term) ) =>
@@ -208,7 +227,6 @@ def structuredIntros (target : Expr) (terms : TSyntaxArray `term) : TacticM Unit
           binders := binders.push (← `(term| ($(mkIdent autoName) : $t)))
           addTrace `xx m!"From only type to ({autoName} : {t})"
         | `( ($id:ident : $t:term) ) =>
-          -- TODO: verify id available
           binders := binders.push (← `(term| ($id : $t)))
           addTrace `xx m!"This is a binder with ident, already structured"
         | _ =>
@@ -285,36 +303,28 @@ def structuredCasesOrInduction (oldGoal : MVarId) (target : TSyntax `term) (isIn
 
 -- Sub function for `structuredCasesDefault`
 def mkDefaultCase (oldGoal : MVarId) (newGoal : MVarId) : TacticM (TSyntax `tactic) := do
-  -- withoutModifyingState because we rename local declaarations to 
   withoutModifyingState do
-    -- Minor todo: sometimes tag is empty, what to do then? I've seen it before, but cannot reproduce anymore
     let caseTag ← `(binderIdent|$(mkIdent (← newGoal.getTag)):ident)
 
     let s ← goalsToStateDiff oldGoal newGoal
 
+    -- Go over newDecls, rename if they are inaccessible, keep track in lctx 
     let mut lctx := (← newGoal.getDecl).lctx
     let mut caseArgs := #[]
-    let mut newDeclsFVars := #[]
-
+    
     for decl in s.newDecls do
-      -- Rename decl if anonymous
       if decl.userName.hasMacroScopes then
         let baseName := if ← isProp decl.type then "h" else "a"
         let caseArgName := lctx.getUnusedName (.str .anonymous baseName) 
         let caseArgIdent := mkIdent caseArgName
         caseArgs := caseArgs.push (← `(binderIdent|$caseArgIdent:ident))
         lctx := lctx.setUserName decl.fvarId caseArgName
-        newDeclsFVars := newDeclsFVars.push decl.fvarId
     
-    -- TODO this is not pretty, not sure if it may break if decls are dependent on each other
-    let newDecls ← newDeclsFVars.filterMapM fun newDeclFVar => do
-      withLCtx lctx (← getLocalInstances) do
-        match lctx.find? newDeclFVar with
-        | some ldecl => return some ldecl
-        | none => unreachable!
-
-    let noteSuggestion ← mkSuggestion (newDecls ++ s.changedDecls) s.newlyChangedGoal none
-    `(tactic|case $caseTag $[$caseArgs]* => $noteSuggestion:tactic)
+    -- Use updated lctx specifically to make the suggestions, this time from fvars because decls change, fvars dont 
+    withLCtx lctx (← getLocalInstances) do
+      let fvars := (s.newDecls.map fun decl => decl.fvarId) ++ (s.changedDecls.map fun decl => decl.fvarId)
+      let noteSuggestion ← mkSuggestionFromFVars fvars s.newlyChangedGoal none
+      `(tactic|case $caseTag $[$caseArgs]* => $noteSuggestion:tactic)
 
 -- When multiple post-goals, but no match on cases or induction
 def structuredCasesDefault (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) (newGoals : List MVarId) : TacticM Unit := do
@@ -360,8 +370,8 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
     let goalType := (← goal.getDecl).type
     match tacs with
     | #[] => logWarning "No tactics in tacSeq"
-    | #[t] =>
-      match t with
+    | #[tac] =>
+      match tac with
       -- Native Lean 4 tactics
       | `(tactic|suffices $_) 
       | `(tactic|show $_) 
@@ -383,13 +393,13 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
           let autoName ← mkNameFromTerm type
           let suggestion ← `(tactic|have $autoName : $type := $rhs)
           addTrace `structured m!"Try this: {suggestion}"
-      | tac@`(tactic|have $id:ident := $rhs) -- named untyped
+      | `(tactic|have $id:ident := $rhs) -- named untyped
         =>
           let autoType ← mkTypeFromTac tac
           let suggestion ← `(tactic|have $id : $autoType := $rhs)
           addTrace `structured m!"Try this: {suggestion}"
-      | tac@`(tactic|have $_:hole := $rhs) -- hole-named untyped
-      | tac@`(tactic|have := $rhs) -- unnamed untyped
+      | `(tactic|have $_:hole := $rhs) -- hole-named untyped
+      | `(tactic|have := $rhs) -- unnamed untyped
         =>
           let autoType ← mkTypeFromTac tac
           let autoName ← mkNameFromTerm autoType
@@ -401,14 +411,14 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
           let autoName ← mkNameFromTerm type
           let suggestion ← `(tactic|let $autoName : $type := $rhs)
           addTrace `structured m!"Try this: {suggestion}"
-      | tac@`(tactic|let $_:hole := $rhs) -- hole-named untyped    
+      | `(tactic|let $_:hole := $rhs) -- hole-named untyped    
         => 
           let autoType ← mkTypeFromTac tac
           let autoName ← mkNameFromTerm autoType
           let suggestion ← `(tactic|let $autoName : $autoType := $rhs)
           addTrace `structured m!"Try this: {suggestion}"
 
-      | tac@`(tactic|intro $ts:term*) 
+      | `(tactic|intro $ts:term*) 
         => 
           evalTactic tac
           withMainContext do
@@ -419,7 +429,7 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
             else
               structuredIntros goalType ts
 
-      | tac@`(tactic|intros $ids*)
+      | `(tactic|intros $ids*)
         => 
           evalTactic tac
           withMainContext do
@@ -431,10 +441,11 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
               let s ← goalsToStateDiff goal newGoal
               match (s.newDecls, s.changedDecls, s.removedDecls) with
               | (newDecls, #[], #[]) => 
+                let termHoles := mkArray newDecls.size (← `( _ ))
                 -- TODO there must be an easier way to create an newDecls.size array of _
-                let mut termHoles := #[]
-                for _ in newDecls do
-                  termHoles := termHoles.push (← `( _ ))
+                -- let mut termHoles := #[]
+                -- for _ in newDecls do
+                --   termHoles := termHoles.push (← `( _ ))
                 structuredIntros goalType termHoles
               | _ => throwUnsupportedSyntax
             else
@@ -495,7 +506,8 @@ example (n m : Nat) : Even n ∧ Even m → Even 0 → Even 2 → Even (n + m) :
   -- intros
   -- intros hm _
   -- structured intro ⟨hn, _⟩ _ _
-  structured intro (⟨hn, _⟩ : Even n ∧ Even m)(h : Even 0)(h_1 : Even 2)
+  -- structured intro (⟨hn, _⟩ : Even n ∧ Even m)(h : Even 0)(h_1 : Even 2)
+  structured intros
   admit
 
 example : α ↔ α := by
