@@ -34,21 +34,21 @@ def mkHave (decl : LocalDecl) (tacSeq : TSyntax ``tacticSeq) : TermElabM (TSynta
     `(tactic|have $autoName : $declType := by $tacSeq)
 
 
-def mkSuggestion (decls : Array LocalDecl := #[]) (optGoal : Option Term := none) (optTacSeq : Option (TSyntax ``tacticSeq)) : TermElabM (TSyntax `tactic) := do
+def mkSuggestion (decls : Array LocalDecl := #[]) (optTarget : Option Term := none) (optTacSeq : Option (TSyntax ``tacticSeq)) : TermElabM (TSyntax `tactic) := do
   let binders ← decls.mapM (fun decl => declToBinder decl)  
-  match optGoal with
-  | some goal => 
+  match optTarget with
+  | some target => 
     match optTacSeq with
     | some tacSeq => 
       if binders.size == 0 then
-        `(tactic|s_suffices $goal:term by $tacSeq)    
+        `(tactic|s_suffices $target:term by $tacSeq)    
       else
-        `(tactic|s_suffices $[$binders]* ⊢ $goal by $tacSeq)
+        `(tactic|s_suffices $[$binders]* ⊢ $target by $tacSeq)
     | none => 
       if binders.size == 0 then
-        `(tactic|show $goal)
+        `(tactic|show $target)
       else
-        `(tactic|s_show $[$binders]* ⊢ $goal)
+        `(tactic|s_show $[$binders]* ⊢ $target)
   | none => 
     match optTacSeq with
     | some tacSeq => 
@@ -62,21 +62,21 @@ def mkSuggestion (decls : Array LocalDecl := #[]) (optGoal : Option Term := none
       else
         `(tactic|s_have $[$binders]*)
 
-def mkSuggestionFromFVars (fvars : Array FVarId := #[]) (optGoal : Option Term := none) (optTacSeq : Option (TSyntax ``tacticSeq)) : TacticM (TSyntax `tactic) := do
+def mkSuggestionFromFVars (fvars : Array FVarId := #[]) (optTarget : Option Term := none) (optTacSeq : Option (TSyntax ``tacticSeq)) : TacticM (TSyntax `tactic) := do
   let binders ← fvars.mapM (fun fvar => do declToBinder (← fvar.getDecl))  
-  match optGoal with
-  | some goal => 
+  match optTarget with
+  | some target => 
     match optTacSeq with
     | some tacSeq => 
       if binders.size == 0 then
-        `(tactic|s_suffices $goal:term by $tacSeq)    
+        `(tactic|s_suffices $target:term by $tacSeq)    
       else
-        `(tactic|s_suffices $[$binders]* ⊢ $goal by $tacSeq)
+        `(tactic|s_suffices $[$binders]* ⊢ $target by $tacSeq)
     | none => 
       if binders.size == 0 then
-        `(tactic|show $goal)
+        `(tactic|show $target)
       else
-        `(tactic|s_show $[$binders]* ⊢ $goal)
+        `(tactic|s_show $[$binders]* ⊢ $target)
   | none => 
     match optTacSeq with
     | some tacSeq => 
@@ -93,13 +93,13 @@ def mkSuggestionFromFVars (fvars : Array FVarId := #[]) (optGoal : Option Term :
 
 -- ## Segment description
 structure StateDiff where
-  newlyChangedGoal : Option Term
+  target : Option (TSyntax `term)
   newDecls : Array LocalDecl
   changedDecls : Array LocalDecl
   removedDecls : Array LocalDecl
 
 def StateDiff.toMessageData (s : StateDiff) : MessageData :=
-  m!"isGoalChanged: {if s.newlyChangedGoal == none then "false" else "true"}, 
+  m!"isGoalChanged: {if s.target == none then "false" else "true"}, 
       newDecls: [{s.newDecls.map fun ldecl => ldecl.type}], 
       changedDecls: [{s.changedDecls.map fun ldecl => ldecl.type}],
       removedDecls: [ {s.removedDecls.map fun ldecl => ldecl.type} ]"
@@ -108,7 +108,7 @@ def goalsToStateDiff (oldGoal : MVarId) (newGoal : MVarId) : TacticM StateDiff :
   let oldGoalType ← instantiateMVars (← oldGoal.getDecl).type
   let newGoalType ← instantiateMVars (← newGoal.getDecl).type
   let isSameGoal := oldGoalType.consumeMData == newGoalType.consumeMData
-  let newlyChangedGoal := if isSameGoal then none else some (← delab newGoalType)
+  let target := if isSameGoal then none else some (← delab newGoalType)
 
   let oldLCtx := (← oldGoal.getDecl).lctx
   let newLCtx := (← newGoal.getDecl).lctx
@@ -130,16 +130,16 @@ def goalsToStateDiff (oldGoal : MVarId) (newGoal : MVarId) : TacticM StateDiff :
         newDecls := newDecls.push newDecl
 
   for oldDecl in oldLCtx do
-    if !oldDecl.isAuxDecl then
+    if !oldDecl.isImplementationDetail then
       let mut foundMatch : Bool := false
       for newDecl in newLCtx do
-        if !newDecl.isAuxDecl then
+        if !newDecl.isImplementationDetail then
           if oldDecl.userName == newDecl.userName then
             foundMatch := true
       if !foundMatch then
         removedDecls := removedDecls.push oldDecl
 
-  return StateDiff.mk newlyChangedGoal newDecls changedDecls removedDecls
+  return StateDiff.mk target newDecls changedDecls removedDecls
 
 def mkNameFromTerm (type : Term) : TacticM (TSyntax `ident) := do
   let elaboratedTerm ← elabTerm type none
@@ -163,7 +163,7 @@ def mkTypeFromTac (rhs : TSyntax `tactic) : TacticM (TSyntax `term) :=
 def mapMVarToNote (oldGoal : MVarId) (newGoal : MVarId) : TacticM (TSyntax `tactic) := do
   newGoal.withContext do
     let s ← goalsToStateDiff oldGoal newGoal
-    mkSuggestion (s.changedDecls ++ s.newDecls) s.newlyChangedGoal none
+    mkSuggestion (s.changedDecls ++ s.newDecls) s.target none
 
 def getNotesFromTac (oldGoal : MVarId) (tac : TSyntax `tactic) : TacticM (List (TSyntax `tactic)) := do
   oldGoal.withContext do
@@ -323,7 +323,7 @@ def mkDefaultCase (oldGoal : MVarId) (newGoal : MVarId) : TacticM (TSyntax `tact
     -- Use updated lctx specifically to make the suggestions, this time from fvars because decls change, fvars dont 
     withLCtx lctx (← getLocalInstances) do
       let fvars := (s.newDecls.map fun decl => decl.fvarId) ++ (s.changedDecls.map fun decl => decl.fvarId)
-      let noteSuggestion ← mkSuggestionFromFVars fvars s.newlyChangedGoal none
+      let noteSuggestion ← mkSuggestionFromFVars fvars s.target none
       `(tactic|case $caseTag $[$caseArgs]* => $noteSuggestion:tactic)
 
 -- When multiple post-goals, but no match on cases or induction
@@ -341,17 +341,15 @@ def structuredDefault (tacSeq : TSyntax ``tacticSeq) (oldGoal : MVarId) : Tactic
   | [newGoal] => 
     let s ← goalsToStateDiff oldGoal newGoal
 
-    match (s.newlyChangedGoal, s.newDecls, s.changedDecls, s.removedDecls) with
+    match (s.target, s.newDecls, s.changedDecls, s.removedDecls) with
     | (none, #[], #[], #[]) => 
       throwError "Unexpected state: no changes before and after tactic evaluation"
-    | ((some newGoal), #[], #[], #[]) => 
-      let suggestion ← mkSuffices newGoal tacSeq
+    | (none, #[decl], #[], #[])
+    | (none, #[], #[decl], #[]) =>
+      let suggestion ← mkHave decl tacSeq
       addTrace `structured m!"Try this: {suggestion}"
-    | (none, #[newDecl], #[], #[]) =>
-      let suggestion ← mkHave newDecl tacSeq
-      addTrace `structured m!"Try this: {suggestion}"
-    | (newlyChangedGoal, newDecls, changedDecls, #[]) =>
-      let suggestion ← mkSuggestion (newDecls ++ changedDecls) newlyChangedGoal tacSeq
+    | (target, newDecls, changedDecls, #[]) =>
+      let suggestion ← mkSuggestion (newDecls ++ changedDecls) target tacSeq
       addTrace `structured m!"Try this: {suggestion}"
     | _ => 
       throwError "Unexpected state: Currently only occurs if any local declaration is lost after tactic evaluation.
@@ -531,3 +529,10 @@ example (n : Nat) : n = n := by
   --   s_show (n_1 : Nat) ⊢ Nat.succ n_1 = Nat.succ n_1 
   --   admit
   admit
+
+
+example : Even 4 := by
+  structured repeat apply Even.add_two _ _
+  admit
+
+

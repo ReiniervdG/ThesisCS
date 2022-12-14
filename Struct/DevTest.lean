@@ -541,3 +541,8 @@ example : False := by
   -- Expr: Lean.Expr.app [...]
   admit
   
+-- def procedure (tacSeq : TSyntax `tacticSeq) : TacticM Unit := do
+--   let oldGoals : List MVarId ← getUnsolvedGoals
+--   evalTactic tacSeq
+--   let newGoals : List MVarId ← getUnsolvedGoals
+--   -- Construct structuring suggestions here
