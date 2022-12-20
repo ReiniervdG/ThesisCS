@@ -13,75 +13,25 @@ open
 
 /-
   # Stuct - Core of the `structured` tactic
-
-
-
 -/
-
--- ## xx
 
 def mkSuggestion (fvars : Array FVarId := #[]) (optTarget : Option Term := none) (optTacSeq : Option (TSyntax ``tacticSeq)) : TermElabM (TSyntax `tactic) := do
   let decls ← fvars.mapM fun fvar => do fvar.getDecl
   let binders ← decls.mapM fun decl => declToBinder decl
-  match optTarget with
-  | some target => 
-    match optTacSeq with
-    | some tacSeq => 
-      if binders.size == 0 then
-        `(tactic|s_suffices $target:term by $tacSeq)    
-      else
-        `(tactic|s_suffices $[$binders]* ⊢ $target by $tacSeq)
-    | none => 
-      if binders.size == 0 then
-        `(tactic|show $target)
-      else
-        `(tactic|s_show $[$binders]* ⊢ $target)
-  | none => 
-    match optTacSeq with
-    | some tacSeq => 
-      if binders.size == 0 then
-        throwError "No change of state detected, unreachable state, this should be caught by goal comparison match"
-      else if binders.size == 1 then
-        let decl := decls[0]!
-        let declIdent := mkIdent decl.userName
-        let declType ← delab (← instantiateMVars decl.type) 
-        `(tactic|have $declIdent:ident : $declType := by $tacSeq)
-      else
-        `(tactic|s_have $[$binders]* by $tacSeq)
-    | none => 
-      if binders.size == 0 then
-        throwError "No change of state detected, unreachable state, this should be caught by goal comparison match"
-      else
-        `(tactic|s_have $[$binders]*)
 
-def mkSuggestionFromFVars (fvars : Array FVarId := #[]) (optTarget : Option Term := none) (optTacSeq : Option (TSyntax ``tacticSeq)) : TacticM (TSyntax `tactic) := do
-  let binders ← fvars.mapM (fun fvar => do declToBinder (← fvar.getDecl))  
-  match optTarget with
-  | some target => 
-    match optTacSeq with
-    | some tacSeq => 
-      if binders.size == 0 then
-        `(tactic|s_suffices $target:term by $tacSeq)    
-      else
-        `(tactic|s_suffices $[$binders]* ⊢ $target by $tacSeq)
-    | none => 
-      if binders.size == 0 then
-        `(tactic|show $target)
-      else
-        `(tactic|s_show $[$binders]* ⊢ $target)
-  | none => 
-    match optTacSeq with
-    | some tacSeq => 
-      if binders.size == 0 then
-        throwError "No change of state detected, unreachable state, this should be caught by goal comparison match"
-      else
-        `(tactic|s_have $[$binders]* by $tacSeq)
-    | none => 
-      if binders.size == 0 then
-        throwError "No change of state detected, unreachable state, this should be caught by goal comparison match"
-      else
-        `(tactic|s_have $[$binders]*)
-
+  match (optTarget, binders, optTacSeq) with
+  | (none, #[], _) => throwError "Nothing to annotate!"
+  | (some target, #[], none) => `(tactic|show $target)
+  | (some target, #[], some tacSeq) => `(tactic|s_suffices $target:term by $tacSeq)
+  | (some target, bs, none) => `(tactic|s_show $[$bs]* ⊢ $target)
+  | (some target, bs, some tacSeq) => `(tactic|s_suffices $[$bs]* ⊢ $target by $tacSeq)
+  | (none, #[_], some tacSeq) => 
+      let decl := decls[0]!
+      let declIdent := mkIdent decl.userName
+      let declType ← delab (← instantiateMVars decl.type) 
+      `(tactic|have $declIdent:ident : $declType := by $tacSeq)
+  | (none, bs, some tacSeq) => `(tactic|s_have $[$bs]* by $tacSeq)
+  | (none, bs, none) => `(tactic|s_have $[$bs]*)
 
 -- ## Segment description
 structure StateDiff where
@@ -95,7 +45,7 @@ def goalsToStateDiff (oldGoal : MVarId) (newGoal : MVarId) : TacticM StateDiff :
   let target := if isSameGoal then none else some (← delab newGoalType)
 
   let oldLCtx := (← oldGoal.getDecl).lctx
-  let newLCtx : LocalContext := (← newGoal.getDecl).lctx
+  let newLCtx := (← newGoal.getDecl).lctx
 
   let mut fvars := #[]
 
@@ -253,7 +203,7 @@ def structuredCasesOrInduction (oldGoal : MVarId) (target : TSyntax `term) (isIn
     let cases := (← ival.ctors.mapM fun ctor => mkInductionAlt fnName ctor isInduction).toArray
     
     if isInduction then
-      let matchWithoutNotes ← `(tactic| induction $target:term with $[$cases]*)
+      let matchWithoutNotes ← `(tactic| induction $target with $[$cases]*)
       let notes ← getNotesFromTac oldGoal matchWithoutNotes
       let casesWithNotes ← cases.zip notes.toArray |>.mapM (fun (case, note) => do replaceHoleWithNoteInductionAlt case note)
       let matchWithNotes ← `(tactic| induction $target:term with $[$casesWithNotes]*)
@@ -346,6 +296,12 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
           let suggestion ← `(tactic|have $autoName : $type := $rhs)
           addTrace `structured m!"Try this: {suggestion}"
           evalTactic tac
+      | `(tactic|have : $type:term := $rhs) -- unnamed typed
+        =>
+          let autoName := mkIdent (.str .anonymous "this")
+          let suggestion ← `(tactic|have $autoName : $type := $rhs)
+          addTrace `structured m!"Try this: {suggestion}"
+          evalTactic tac
       | `(tactic|have $id:ident := $rhs) -- named untyped
         =>
           let autoType ← mkTypeFromTac tac
@@ -353,10 +309,16 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
           addTrace `structured m!"Try this: {suggestion}"
           evalTactic tac
       | `(tactic|have $_:hole := $rhs) -- hole-named untyped
+        =>
+          let autoType ← mkTypeFromTac tac
+          let autoName ← mkNameFromTerm type
+          let suggestion ← `(tactic|have $autoName : $autoType := $rhs)
+          addTrace `structured m!"Try this: {suggestion}"
+          evalTactic tac
       | `(tactic|have := $rhs) -- unnamed untyped
         =>
           let autoType ← mkTypeFromTac tac
-          let autoName ← mkNameFromTerm autoType
+          let autoName := mkIdent (.str .anonymous "this")
           let suggestion ← `(tactic|have $autoName : $autoType := $rhs)
           addTrace `structured m!"Try this: {suggestion}"
           evalTactic tac
@@ -435,6 +397,7 @@ example : Even 4 := by
 example : Even 4 := by
   structured 
     have _ : Even 0 := Even.zero
+  structured have : Even 0 := Even.zero
 
   structured 
     have x := Even.zero
