@@ -9,26 +9,7 @@ open
   Lean.Parser 
   Lean.Parser.Tactic
 
-/- 
-  # TODO: redo description
-  # Description of the purpose of this file 
-
-  ## ..
--/
-
--- ## Introduce assertion helpers
-def assertGoal (goalType : TSyntax `term) : TacticM Unit := withMainContext do
-  let realGoalType ← instantiateMVars (← (← getMainGoal).getDecl).type.consumeMData
-  let expectedGoalType := (← elabTerm goalType none).consumeMData
-  if !(realGoalType == expectedGoalType) then
-    throwError m!"AssertionError: Expected goal {expectedGoalType}, got {realGoalType}"
-  else
-    return
-
-elab &"assertGoal " t:term : tactic =>
-  assertGoal t
-
--- assertHyp also allows an unnamed assertion with a (_ : type) binder, but is not used in suggestions anymore
+-- assertHyp also allows an unnamed assertion with a (_ : type) binder, but is not fully supported in suggestions anymore
 def assertHyp (hypName : Option (TSyntax `ident) := none) (hypType : TSyntax `term) : TacticM Unit := withMainContext do
   let hypExpr ← elabTerm hypType none
   let mainGoal ← getMainGoal
@@ -93,15 +74,11 @@ def declToBinder (decl : LocalDecl) : TermElabM (TSyntax `strucBinder) := do
 
 -- # Main custom tactics
 
-elab &"s_suffices " obs:(strucBinders)? g:term sb:strucBy : tactic => do
+elab &"s_suffices " bs:strucBinder* " ⊢ " g:term sb:strucBy : tactic => do
   evalTactic (← strucByToTacSeq sb)
-  if let some bs := obs then
-    match bs with
-    | `(strucBinders| $bs:strucBinder* ⊢) =>
-      for b in bs do
-        evalTactic (← strucBinderToAssertTactic b)
-    | _ => throwUnsupportedSyntax
-  evalTactic (← `(tactic|assertGoal $g))
+  for b in bs do
+    evalTactic (← strucBinderToAssertTactic b)
+  evalTactic (← `(tactic|show $g))
 
 elab &"s_have" bs:strucBinder* osb:(strucBy)? : tactic => do
   if let some sb := osb then
@@ -116,4 +93,4 @@ elab &"s_show" obs:(strucBinders)? g:term : tactic => do
       for b in bs do
         evalTactic (← strucBinderToAssertTactic b)
     | _ => throwUnsupportedSyntax
-  evalTactic (← `(tactic|assertGoal $g))
+  evalTactic (← `(tactic|show $g))

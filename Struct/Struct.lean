@@ -22,7 +22,7 @@ def mkSuggestion (fvars : Array FVarId := #[]) (optTarget : Option Term := none)
   match (optTarget, binders, optTacSeq) with
   | (none, #[], _) => throwError "Nothing to annotate!"
   | (some target, #[], none) => `(tactic|show $target)
-  | (some target, #[], some tacSeq) => `(tactic|s_suffices $target:term by $tacSeq)
+  | (some target, #[], some tacSeq) => `(tactic|s_suffices ⊢ $target:term by $tacSeq)
   | (some target, bs, none) => `(tactic|s_show $[$bs]* ⊢ $target)
   | (some target, bs, some tacSeq) => `(tactic|s_suffices $[$bs]* ⊢ $target by $tacSeq)
   | (none, #[_], some tacSeq) => 
@@ -128,9 +128,12 @@ def structuredIntros (target : Expr) (terms : TSyntaxArray `term) : TacticM Unit
     for t in terms, fvarExpr in fvarExprs do
       match fvarExpr with
       | .fvar fvarId =>
-        let typeExpr := (← fvarId.getDecl).type
+        let typeDecl ← fvarId.getDecl
+        let typeExpr := typeDecl.type
         let type <- withLCtx lctx localInsts $ delab typeExpr
-        let baseAutoName := if ← isProp typeExpr then "h" else "a"
+        let baseAutoName := if typeDecl.userName.hasMacroScopes then 
+          if ← isProp typeExpr then "h" else "a" 
+          else typeDecl.userName.toString
 
         match t with
         | `( _ ) =>
@@ -149,7 +152,18 @@ def structuredIntros (target : Expr) (terms : TSyntaxArray `term) : TacticM Unit
           binders := binders.push (← `(term| ($t : $type)))
       | _ => throwUnsupportedSyntax
     let suggestion ← `(tactic|intro $[$binders]*)
-    addTrace `structured m!"Try this: {suggestion}"
+
+    let numArgs ← forallTelescope target fun args _ => do return args.size
+    if terms.size > numArgs then
+      let goalType ← instantiateMVars (← (← getMainGoal).getDecl).type
+      let goalTerm ← delab goalType 
+      let goalSuggestion ← `(tactic|show $goalTerm)
+      let tacSeq ← `(tacticSeq| 
+        $suggestion:tactic
+        $goalSuggestion:tactic)
+      addTrace `structured m!"Try this: {tacSeq}"
+    else
+      addTrace `structured m!"Try this: {suggestion}"
 
 -- Sub function for `structuredCasesOrInduction`
 def mkInductionAlt (fnName : Name) (ctor : Name) (isInduction : Bool) : TacticM (TSyntax ``inductionAlt) := do
@@ -282,7 +296,7 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
       | `(tactic|let $_:ident : $_:term := $_)
       -- Custom tactics
       | `(tactic|s_suffices $[$bs]* ⊢ $_ by $_)
-      | `(tactic|s_suffices $_:term by $_)
+      | `(tactic|s_suffices ⊢ $_:term by $_)
       | `(tactic|s_have $[$bs]* by $_)
       | `(tactic|s_have $[$bs]*)
       | `(tactic|s_show $[$bs]* ⊢ $_)
@@ -311,7 +325,7 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
       | `(tactic|have $_:hole := $rhs) -- hole-named untyped
         =>
           let autoType ← mkTypeFromTac tac
-          let autoName ← mkNameFromTerm type
+          let autoName ← mkNameFromTerm autoType
           let suggestion ← `(tactic|have $autoName : $autoType := $rhs)
           addTrace `structured m!"Try this: {suggestion}"
           evalTactic tac
@@ -382,82 +396,3 @@ def structuredCore (tacSeq : TSyntax ``tacticSeq) : TacticM Unit := do
 -- Elaborate tactic
 elab &"structured " t:tacticSeq : tactic =>
   structuredCore t
-
--- TMP Testing code below
-
-inductive Even : Nat → Prop
-| zero : Even Nat.zero
-| add_two : ∀ k : Nat, Even k → Even (k+2)
-| combine_two (n : Nat) (hn : Even n) : ∀ m : Nat, Even m → Even (n + m)
-
-example : Even 4 := by
-  structured repeat apply Even.add_two _ _
-  admit
-
-example : Even 4 := by
-  structured 
-    have _ : Even 0 := Even.zero
-  structured have : Even 0 := Even.zero
-
-  structured 
-    have x := Even.zero
-
-  structured
-    have := Even.zero
-  let _ : Even 0 := Even.zero
-  admit
-
-example : α₁ → α₂ ∧ α₃ → α₄ ∧ α₅ → α₆ ∧ α₇ → α₁ := by
-  structured
-    intros
-  -- intro (ha1 : α₁) (h : α₂ ∧ α₃) (h_1 : α₄ ∧ α₅) 
-  admit
-  
-
-example (n m : Nat) : Even n ∧ Even m → Even 0 → Even 2 → Even (n + m) := by 
-  -- intro
-  -- intro _ 
-  -- intro hnm
-  -- intros _
-  -- intro hnm _
-  -- intros
-  -- intros hm _
-  -- structured intro ⟨hn, _⟩ _ _
-  -- structured intro (⟨hn, _⟩ : Even n ∧ Even m)(h : Even 0)(h_1 : Even 2)
-  structured intros
-  admit
-
-example : α ↔ α := by
-  structured
-    apply Iff.intro
-    intro _
-  repeat admit
-  -- apply Iff.intro
-  -- intro _
-  -- case mp h => 
-  --   s_show (h : α) ⊢ α
-  -- case mpr => show α → α
-
-example (n : Nat) : n = n := by
-  structured cases n
-  -- cases n with
-  -- | zero => 
-  --   show Nat.zero = Nat.zero
-  --   admit
-  -- | succ n_1 => 
-  --   s_show (n_1 : Nat) ⊢ Nat.succ n_1 = Nat.succ n_1 
-  --   admit
-  admit
-
-
-example : Even 4 := by
-  structured repeat apply Even.add_two _ _
-  admit
-
-
-example (n m : Nat) (h : Even (n + m)) : m = 0 → Even n := by
-  intro hm
-  structured 
-    rw [hm] at h
-    simp at *
-  admit
